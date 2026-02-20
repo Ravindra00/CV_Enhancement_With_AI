@@ -54,14 +54,20 @@ def create_cv(
     """Create a new CV."""
     new_cv = CV(
         user_id=current_user.id,
+        full_name=cv_data.full_name,
         title=cv_data.title,
-        personal_info=cv_data.personal_info or {},
-        experiences=cv_data.experiences or [],
+        email=cv_data.email,
+        phone=cv_data.phone,
+        location=cv_data.location,
+        linkedin_url=cv_data.linkedin_url,
+        profile_summary=cv_data.profile_summary,
         educations=cv_data.educations or [],
-        skills=cv_data.skills or [],
-        certifications=cv_data.certifications or [],
+        experiences=cv_data.experiences or [],
+        projects=cv_data.projects or [],
+        skills=cv_data.skills or {},
         languages=cv_data.languages or [],
-        projects=cv_data.projects or []
+        certifications=cv_data.certifications or [],
+        current_version=cv_data.current_version or 1
     )
     
     db.add(new_cv)
@@ -90,22 +96,32 @@ def update_cv(
         )
     
     # Update only provided fields
+    if cv_data.full_name is not None:
+        cv.full_name = cv_data.full_name
     if cv_data.title is not None:
         cv.title = cv_data.title
-    if cv_data.personal_info is not None:
-        cv.personal_info = cv_data.personal_info
-    if cv_data.experiences is not None:
-        cv.experiences = cv_data.experiences
+    if cv_data.email is not None:
+        cv.email = cv_data.email
+    if cv_data.phone is not None:
+        cv.phone = cv_data.phone
+    if cv_data.location is not None:
+        cv.location = cv_data.location
+    if cv_data.linkedin_url is not None:
+        cv.linkedin_url = cv_data.linkedin_url
+    if cv_data.profile_summary is not None:
+        cv.profile_summary = cv_data.profile_summary
     if cv_data.educations is not None:
         cv.educations = cv_data.educations
-    if cv_data.skills is not None:
-        cv.skills = cv_data.skills
-    if cv_data.certifications is not None:
-        cv.certifications = cv_data.certifications
-    if cv_data.languages is not None:
-        cv.languages = cv_data.languages
+    if cv_data.experiences is not None:
+        cv.experiences = cv_data.experiences
     if cv_data.projects is not None:
         cv.projects = cv_data.projects
+    if cv_data.skills is not None:
+        cv.skills = cv_data.skills
+    if cv_data.languages is not None:
+        cv.languages = cv_data.languages
+    if cv_data.certifications is not None:
+        cv.certifications = cv_data.certifications
     
     cv.updated_at = datetime.utcnow()
     
@@ -167,17 +183,23 @@ def upload_cv_file(
         
         # Update CV with parsed data - save into separate columns
         cv.title = os.path.splitext(file.filename)[0]  # CV name = filename without extension
-        cv.file_path = file_path
-        cv.original_text = parsed_data.get('raw_text', '')
         
-        # Map parser output keys to database column names
-        cv.personal_info = parsed_data.get('personalInfo', {})
-        cv.experiences = parsed_data.get('experience', [])
+        # Map parser output to new CV schema
+        cv.full_name = parsed_data.get('full_name') or parsed_data.get('personalInfo', {}).get('name')
+        cv.email = parsed_data.get('email') or parsed_data.get('personalInfo', {}).get('email')
+        cv.phone = parsed_data.get('phone') or parsed_data.get('personalInfo', {}).get('phone')
+        cv.location = parsed_data.get('location') or parsed_data.get('personalInfo', {}).get('location')
+        cv.linkedin_url = parsed_data.get('linkedin_url') or parsed_data.get('personalInfo', {}).get('linkedin')
+        cv.profile_summary = parsed_data.get('profile_summary') or parsed_data.get('personalInfo', {}).get('summary')
+        
+        # Map array sections
         cv.educations = parsed_data.get('education', [])
-        cv.skills = parsed_data.get('skills', [])
+        cv.experiences = parsed_data.get('experience', [])
+        cv.skills = parsed_data.get('skills', {})
         cv.certifications = parsed_data.get('certifications', [])
         cv.languages = parsed_data.get('languages', [])
         cv.projects = parsed_data.get('projects', [])
+        cv.current_version = 1
         cv.updated_at = datetime.utcnow()
         
         db.commit()
@@ -215,10 +237,15 @@ def analyze_cv_endpoint(
     
     # Build CV data dict from all columns
     cv_data = {
-        'personal_info': cv.personal_info or {},
+        'full_name': cv.full_name,
+        'email': cv.email,
+        'phone': cv.phone,
+        'location': cv.location,
+        'linkedin_url': cv.linkedin_url,
+        'profile_summary': cv.profile_summary,
         'experiences': cv.experiences or [],
         'educations': cv.educations or [],
-        'skills': cv.skills or [],
+        'skills': cv.skills or {},
         'certifications': cv.certifications or [],
         'languages': cv.languages or [],
         'projects': cv.projects or []
@@ -253,10 +280,15 @@ def customize_cv(
     
     # Build CV data dict from all columns
     cv_data = {
-        'personal_info': cv.personal_info or {},
+        'full_name': cv.full_name,
+        'email': cv.email,
+        'phone': cv.phone,
+        'location': cv.location,
+        'linkedin_url': cv.linkedin_url,
+        'profile_summary': cv.profile_summary,
         'experiences': cv.experiences or [],
         'educations': cv.educations or [],
-        'skills': cv.skills or [],
+        'skills': cv.skills or {},
         'certifications': cv.certifications or [],
         'languages': cv.languages or [],
         'projects': cv.projects or []
@@ -293,8 +325,14 @@ def customize_cv(
     
     # Suggestion 2: Job description matching
     job_desc_lower = request.job_description.lower()
-    current_skills = [s.get('name', '').lower() if isinstance(s, dict) else str(s).lower() 
-                     for s in (cv.skills or [])]
+    current_skills = []
+    if cv.skills:
+        if isinstance(cv.skills, dict):
+            for skill_list in cv.skills.values():
+                if isinstance(skill_list, list):
+                    current_skills.extend([str(s).lower() for s in skill_list])
+        elif isinstance(cv.skills, list):
+            current_skills = [str(s).lower() for s in cv.skills]
     
     if 'python' in job_desc_lower and 'python' not in ' '.join(current_skills):
         suggestions_data.append({
@@ -313,7 +351,7 @@ def customize_cv(
         })
     
     # Suggestion 3: Summary enhancement
-    if not cv.personal_info or not cv.personal_info.get('summary'):
+    if not cv.profile_summary:
         suggestions_data.append({
             "title": "Add Professional Summary",
             "description": "A summary helps recruiters understand your value",
@@ -369,10 +407,15 @@ def enhance_cv_for_job_endpoint(
     
     # Build CV data dict from all columns
     cv_data = {
-        'personal_info': cv.personal_info or {},
+        'full_name': cv.full_name,
+        'email': cv.email,
+        'phone': cv.phone,
+        'location': cv.location,
+        'linkedin_url': cv.linkedin_url,
+        'profile_summary': cv.profile_summary,
         'experiences': cv.experiences or [],
         'educations': cv.educations or [],
-        'skills': cv.skills or [],
+        'skills': cv.skills or {},
         'certifications': cv.certifications or [],
         'languages': cv.languages or [],
         'projects': cv.projects or []
