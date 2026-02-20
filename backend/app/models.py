@@ -1,7 +1,9 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, JSON, Enum
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
+import uuid
 from app.database import Base
 
 
@@ -35,23 +37,34 @@ class CV(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    title = Column(String(255), nullable=True)  # CV name (from filename)
+    
+    # Basic Info
+    full_name = Column(String(150), nullable=True)
+    title = Column(String(255), nullable=True)
+    email = Column(String(150), nullable=True)
+    phone = Column(String(50), nullable=True)
+    location = Column(String(150), nullable=True)
+    linkedin_url = Column(Text, nullable=True)
+    profile_summary = Column(Text, nullable=True)
+    
+    # JSON Sections (JSONB for PostgreSQL)
+    educations = Column(JSON, nullable=True)      # Array of education objects
+    experiences = Column(JSON, nullable=True)     # Array of experience objects
+    projects = Column(JSON, nullable=True)        # Array of project objects
+    skills = Column(JSON, nullable=True)          # Object with skill categories
+    languages = Column(JSON, nullable=True)       # Array of language objects
+    certifications = Column(JSON, nullable=True)  # Array of certification objects
+    
+    # File paths
     file_path = Column(String(500), nullable=True)
-    photo_path = Column(String(500), nullable=True)   # Profile photo
-    original_text = Column(Text, nullable=True)  # Raw text from uploaded file
+    photo_path = Column(String(500), nullable=True)
+    original_text = Column(Text, nullable=True)
+    personal_info = Column(JSON, nullable=True)
     
-    # Personal Information
-    personal_info = Column(JSON, nullable=True)  # {name, email, phone, location, linkedin, website, summary}
-    
-    # CV Sections as separate JSON columns
-    experiences = Column(JSON, nullable=True)   # [{company, position, startDate, endDate, description, skills}]
-    educations = Column(JSON, nullable=True)    # [{institution, degree, field, startDate, endDate, description}]
-    skills = Column(JSON, nullable=True)        # [{name, level, category}]
-    certifications = Column(JSON, nullable=True)  # [{name, issuer, issueDate, expiryDate, credentialUrl}]
-    languages = Column(JSON, nullable=True)     # [{language, proficiency}]
-    projects = Column(JSON, nullable=True)      # [{name, description, link, startDate, endDate, technologies}]
-    
+    # Versioning
+    current_version = Column(Integer, default=1, nullable=True)
     is_active = Column(Boolean, default=True)
+    
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -67,7 +80,7 @@ class CVCustomization(Base):
     __tablename__ = "cv_customizations"
 
     id = Column(Integer, primary_key=True, index=True)
-    cv_id = Column(Integer, ForeignKey("cvs.id"), nullable=False)
+    cv_id = Column(UUID(as_uuid=True), ForeignKey("cvs.id"), nullable=False)
     job_description = Column(Text, nullable=False)
     matched_keywords = Column(JSON, nullable=True)
     customized_data = Column(JSON, nullable=True)
@@ -83,7 +96,7 @@ class Suggestion(Base):
     __tablename__ = "suggestions"
 
     id = Column(Integer, primary_key=True, index=True)
-    cv_id = Column(Integer, ForeignKey("cvs.id"), nullable=False)
+    cv_id = Column(UUID(as_uuid=True), ForeignKey("cvs.id"), nullable=False)
     customization_id = Column(Integer, ForeignKey("cv_customizations.id"), nullable=True)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=False)
@@ -103,7 +116,7 @@ class CoverLetter(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    cv_id = Column(Integer, ForeignKey("cvs.id"), nullable=True)  # Optional: linked CV
+    cv_id = Column(UUID(as_uuid=True), ForeignKey("cvs.id"), nullable=True)  # Optional: linked CV
     title = Column(String(255), nullable=False, default="My Cover Letter")
     # content JSON: { recipient_name, company, role, opening, body, closing, date }
     content = Column(JSON, nullable=True, default=dict)
@@ -121,7 +134,7 @@ class JobApplication(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    cv_id = Column(Integer, ForeignKey("cvs.id"), nullable=True)
+    cv_id = Column(UUID(as_uuid=True), ForeignKey("cvs.id"), nullable=True)
     cover_letter_id = Column(Integer, ForeignKey("cover_letters.id"), nullable=True)
 
     company = Column(String(255), nullable=False)
