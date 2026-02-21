@@ -90,7 +90,7 @@ class CVBase(BaseModel):
     linkedin_url: Optional[str] = None
     profile_summary: Optional[str] = None
 
-class CVCreate(CVBase):
+class CVCreate(BaseModel):
     educations: Optional[List[Dict[str, Any]]] = None
     experiences: Optional[List[Dict[str, Any]]] = None
     projects: Optional[List[Dict[str, Any]]] = None
@@ -99,7 +99,7 @@ class CVCreate(CVBase):
     certifications: Optional[List[Dict[str, Any]]] = None
     current_version: Optional[int] = 1
 
-class CVUpdate(CVBase):
+class CVUpdate(BaseModel):
     educations: Optional[List[Dict[str, Any]]] = None
     experiences: Optional[List[Dict[str, Any]]] = None
     projects: Optional[List[Dict[str, Any]]] = None
@@ -107,13 +107,15 @@ class CVUpdate(CVBase):
     languages: Optional[List[Dict[str, Any]]] = None
     certifications: Optional[List[Dict[str, Any]]] = None
 
-class CVResponse(CVBase):
+class CVResponse(BaseModel):
     id: int
     user_id: int
     educations: Optional[List[Dict[str, Any]]] = None
     experiences: Optional[List[Dict[str, Any]]] = None
     projects: Optional[List[Dict[str, Any]]] = None
-    skills: Optional[Dict[str, Any]] = None
+    # skills: Optional[Dict[str, Any]] = None
+    # skills: Optional[List[Dict[str, Any]]] = None
+    skills: Optional[Dict[str, List[str]]] = None
     languages: Optional[List[Dict[str, Any]]] = None
     certifications: Optional[List[Dict[str, Any]]] = None
     file_path: Optional[str] = None
@@ -130,6 +132,10 @@ class CVResponse(CVBase):
 # ── AI Customization ──────────────────────────────────────────────────────────
 class CVCustomizationRequest(BaseModel):
     job_description: str
+
+class ApplyAIChangesRequest(BaseModel):
+    """Payload for applying AI-enhanced CV data back to the database."""
+    enhanced_cv: Dict[str, Any]
 
 class SuggestionResponse(BaseModel):
     id: int
@@ -156,18 +162,18 @@ class CoverLetterContent(BaseModel):
 
 class CoverLetterCreate(BaseModel):
     title: Optional[str] = "My Cover Letter"
-    cv_id: Optional[UUID] = None
+    cv_id: Optional[int] = None
     content: Optional[Dict[str, Any]] = {}
 
 class CoverLetterUpdate(BaseModel):
     title: Optional[str] = None
-    cv_id: Optional[UUID] = None
+    cv_id: Optional[int] = None
     content: Optional[Dict[str, Any]] = None
 
 class CoverLetterResponse(BaseModel):
     id: int
     user_id: int
-    cv_id: Optional[UUID] = None
+    cv_id: Optional[int] = None
     title: str
     content: Optional[Dict[str, Any]] = {}
     created_at: datetime
@@ -192,7 +198,7 @@ class JobApplicationCreate(BaseModel):
     status: Optional[JobStatusEnum] = JobStatusEnum.saved
     applied_date: Optional[datetime] = None
     notes: Optional[str] = None
-    cv_id: Optional[UUID] = None
+    cv_id: Optional[int] = None
     cover_letter_id: Optional[int] = None
 
 class JobApplicationUpdate(BaseModel):
@@ -204,7 +210,7 @@ class JobApplicationUpdate(BaseModel):
     status: Optional[JobStatusEnum] = None
     applied_date: Optional[datetime] = None
     notes: Optional[str] = None
-    cv_id: Optional[UUID] = None
+    cv_id: Optional[int] = None
     cover_letter_id: Optional[int] = None
 
 class JobApplicationResponse(BaseModel):
@@ -218,7 +224,7 @@ class JobApplicationResponse(BaseModel):
     status: str
     applied_date: Optional[datetime] = None
     notes: Optional[str] = None
-    cv_id: Optional[UUID] = None
+    cv_id: Optional[int] = None
     cover_letter_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime

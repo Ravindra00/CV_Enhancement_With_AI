@@ -114,7 +114,28 @@ def generate_with_ai(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
         
         # Generate cover letter using AI
-        cv_data = cv.parsed_data or {}
+        # cv_data = cv.parsed_data or {}
+        cv_data = {
+            'full_name': cv.full_name,
+            'experiences': cv.experiences or [],
+            'skills': cv.skills or [],
+            'education': cv.education or [],
+            'projects': cv.projects or [],
+            'certifications': cv.certifications or [],
+            'achievements': cv.achievements or [],
+            'volunteering': cv.volunteering or [],
+            'languages': cv.languages or [],
+            'interests': cv.interests or [],
+            'summary': cv.summary or "",
+            'contact': cv.contact or {},
+            'social_links': cv.social_links or [],
+            'publications': cv.publications or [],
+            'patents': cv.patents or [],
+            'awards': cv.awards or [],
+            'references': cv.references or [],
+            'additional_info': cv.additional_info or {},
+            # … etc
+        }
         content = generate_cover_letter(cv_data, request.job_description, current_user.name)
         
         if not content:

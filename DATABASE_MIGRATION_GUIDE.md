@@ -58,7 +58,7 @@ If you have data that needs to be migrated:
 
 ```sql
 -- 1. Create new UUID column
-ALTER TABLE cvs ADD COLUMN new_id UUID DEFAULT gen_random_uuid() UNIQUE;
+ALTER TABLE cvs ADD COLUMN new_id int DEFAULT  
 
 -- 2. Create new tables with UUID schema
 -- (Dump the table definitions from SQLAlchemy and run them)
@@ -161,7 +161,7 @@ CREATE TABLE users (
 
 -- CVs table (updated)
 CREATE TABLE cvs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id int PRIMARY KEY AUTO_INCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
     
     -- Basic Info
@@ -195,7 +195,7 @@ CREATE TABLE cvs (
 -- CV Customizations table (updated)
 CREATE TABLE cv_customizations (
     id SERIAL PRIMARY KEY,
-    cv_id UUID NOT NULL REFERENCES cvs(id),
+    cv_id int NOT NULL REFERENCES cvs(id),
     job_description TEXT NOT NULL,
     matched_keywords JSONB,
     customized_data JSONB,
@@ -207,7 +207,7 @@ CREATE TABLE cv_customizations (
 -- Suggestions table (updated)
 CREATE TABLE suggestions (
     id SERIAL PRIMARY KEY,
-    cv_id UUID NOT NULL REFERENCES cvs(id),
+    cv_id int NOT NULL REFERENCES cvs(id),
     customization_id INTEGER REFERENCES cv_customizations(id),
     title VARCHAR(255) NOT NULL,
     description TEXT NOT NULL,
@@ -222,7 +222,7 @@ CREATE TABLE suggestions (
 CREATE TABLE cover_letters (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id),
-    cv_id UUID REFERENCES cvs(id),
+    cv_id int REFERENCES cvs(id),
     title VARCHAR(255) NOT NULL DEFAULT 'My Cover Letter',
     content JSONB DEFAULT '{}',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -233,7 +233,7 @@ CREATE TABLE cover_letters (
 CREATE TABLE job_applications (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id),
-    cv_id UUID REFERENCES cvs(id),
+    cv_id int REFERENCES cvs(id),
     cover_letter_id INTEGER REFERENCES cover_letters(id),
     company VARCHAR(255) NOT NULL,
     role VARCHAR(255) NOT NULL,
