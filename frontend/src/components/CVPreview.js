@@ -236,7 +236,7 @@ function _renderExperience(experiences, labels, primary, border) {
                 <div key={i} style={{ marginBottom: 7, pageBreakInside: 'avoid' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                         <div>
-                            <span style={{ fontWeight: 700, fontSize: 9 }}>{exp.role || 'Role'}</span>
+                            <span style={{ fontWeight: 700, fontSize: 9 }}>{exp.role || exp.position || exp.job_title || 'Role'}</span>
                             {exp.company && <span style={{ color: primary, fontWeight: 600 }}> · {exp.company}</span>}
                             {exp.location && <span style={{ color: '#6b7280' }}> — {exp.location}</span>}
                         </div>
@@ -292,7 +292,7 @@ function _renderCertifications(certs, labels, primary, border) {
             {certs.map((c, i) => (
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3, pageBreakInside: 'avoid' }}>
                     <div><span style={{ fontWeight: 600 }}>{c.name}</span>{c.issuer && <span style={{ color: '#6b7280' }}> — {c.issuer}</span>}</div>
-                    <span style={{ color: '#6b7280', fontSize: 7.5 }}>{c.date}</span>
+                    <span style={{ color: '#6b7280', fontSize: 7.5 }}>{c.issueDate || c.date}</span>
                 </div>
             ))}
         </div>
@@ -308,7 +308,7 @@ function _renderProjects(projects, labels, primary, border) {
                 <div key={i} style={{ marginBottom: 5, pageBreakInside: 'avoid' }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
                         <span style={{ fontWeight: 700 }}>{p.name}</span>
-                        {p.url && <span style={{ color: primary, fontSize: 7.5 }}>{p.url}</span>}
+                        {(p.link || p.url) && <span style={{ color: primary, fontSize: 7.5 }}>{p.link || p.url}</span>}
                     </div>
                     {p.description && <div style={{ color: '#374151', marginTop: 1 }}>{p.description}</div>}
                 </div>

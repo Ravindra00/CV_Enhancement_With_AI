@@ -17,6 +17,209 @@ UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
+def _build_personal_info_from_flat(cv: CV) -> dict:
+    """Build personal_info dict from flat columns when personal_info JSON is null."""
+    return {
+        'name': cv.full_name or '',
+        'title': cv.title or '',
+        'jobTitle': cv.title or '',
+        'email': cv.email or '',
+        'phone': cv.phone or '',
+        'location': cv.location or '',
+        'linkedin': cv.linkedin_url or '',
+        'website': '',
+        'summary': cv.profile_summary or '',
+        'photo': cv.photo_path or '',
+    }
+
+
+def _get_personal_info(cv: CV) -> dict:
+    """Get personal_info for response - from JSON column or build from flat cols.
+    Preserves existing personal_info data and only fills missing fields from flat columns.
+    """
+    pi = getattr(cv, 'personal_info', None)
+    if pi and isinstance(pi, dict):
+        # Use existing personal_info, but fill missing fields from flat columns
+        pi = dict(pi)
+        # Only fill if not present (preserve user's data)
+        if 'name' not in pi and cv.full_name:
+            pi['name'] = cv.full_name
+        if 'title' not in pi and cv.title:
+            pi['title'] = cv.title
+        if 'jobTitle' not in pi:
+            pi['jobTitle'] = pi.get('title', cv.title or '')
+        if 'email' not in pi and cv.email:
+            pi['email'] = cv.email
+        if 'phone' not in pi and cv.phone:
+            pi['phone'] = cv.phone
+        if 'location' not in pi and cv.location:
+            pi['location'] = cv.location
+        if 'linkedin' not in pi and cv.linkedin_url:
+            pi['linkedin'] = cv.linkedin_url
+        if 'summary' not in pi and cv.profile_summary:
+            pi['summary'] = cv.profile_summary
+        if 'photo' not in pi and cv.photo_path:
+            pi['photo'] = cv.photo_path
+        return pi
+    # Build from flat columns if personal_info doesn't exist
+    return _build_personal_info_from_flat(cv)
+
+
+def _normalize_experience(exp):
+    """Normalize experience object to frontend format. Preserves existing fields."""
+    if not isinstance(exp, dict):
+        return exp
+    normalized = dict(exp)
+    # Map backend field names to frontend format (preserve both if they exist)
+    if 'job_title' in normalized:
+        if 'role' not in normalized:
+            normalized['role'] = normalized['job_title']
+        if 'position' not in normalized:
+            normalized['position'] = normalized['job_title']
+    elif 'position' in normalized and 'role' not in normalized:
+        normalized['role'] = normalized['position']
+    elif 'role' in normalized and 'position' not in normalized:
+        normalized['position'] = normalized['role']
+    
+    if 'company_name' in normalized and 'company' not in normalized:
+        normalized['company'] = normalized['company_name']
+    
+    # Date field mapping - handle start_date, startDate, start_year
+    if 'start_date' in normalized and 'startDate' not in normalized:
+        normalized['startDate'] = normalized['start_date']
+    elif 'start_year' in normalized and 'startDate' not in normalized:
+        normalized['startDate'] = normalized['start_year']
+    elif 'startDate' not in normalized:
+        normalized['startDate'] = ''
+    
+    if 'end_date' in normalized and 'endDate' not in normalized:
+        normalized['endDate'] = normalized['end_date']
+    elif 'end_year' in normalized and 'endDate' not in normalized:
+        normalized['endDate'] = normalized['end_year']
+    elif 'endDate' not in normalized:
+        normalized['endDate'] = ''
+    
+    if 'responsibilities' in normalized:
+        resp = normalized.get('responsibilities', [])
+        if isinstance(resp, list) and len(resp) > 0:
+            # Convert responsibilities array to description string if description doesn't exist
+            if 'description' not in normalized or not normalized.get('description'):
+                normalized['description'] = '\n'.join([f"• {r}" if not r.startswith('•') else r for r in resp])
+    
+    return normalized
+
+
+def _normalize_education(edu):
+    """Normalize education object to frontend format. Handles various field name formats."""
+    if not isinstance(edu, dict):
+        return edu
+    normalized = dict(edu)
+    # Institution name mapping
+    if 'institution_name' in normalized and 'institution' not in normalized:
+        normalized['institution'] = normalized['institution_name']
+    # Field of study mapping
+    if 'field_of_study' in normalized and 'field' not in normalized:
+        normalized['field'] = normalized['field_of_study']
+    # Date field mapping - handle start_date, startDate, start_year
+    if 'start_date' in normalized and 'startDate' not in normalized:
+        normalized['startDate'] = normalized['start_date']
+    elif 'start_year' in normalized and 'startDate' not in normalized:
+        normalized['startDate'] = normalized['start_year']
+    elif 'startDate' not in normalized and 'start_date' not in normalized and 'start_year' not in normalized:
+        normalized['startDate'] = ''
+    # End date mapping
+    if 'end_date' in normalized and 'endDate' not in normalized:
+        normalized['endDate'] = normalized['end_date']
+    elif 'end_year' in normalized and 'endDate' not in normalized:
+        normalized['endDate'] = normalized['end_year']
+    elif 'endDate' not in normalized and 'end_date' not in normalized and 'end_year' not in normalized:
+        normalized['endDate'] = ''
+    return normalized
+
+
+def _normalize_certification(cert):
+    """Normalize certification object to frontend format."""
+    if not isinstance(cert, dict):
+        return cert
+    normalized = dict(cert)
+    if 'issue_date' in normalized and 'issueDate' not in normalized:
+        normalized['issueDate'] = normalized.pop('issue_date')
+    if 'expiry_date' in normalized and 'expiryDate' not in normalized:
+        normalized['expiryDate'] = normalized.pop('expiry_date')
+    if 'credential_url' in normalized and 'credentialUrl' not in normalized:
+        normalized['credentialUrl'] = normalized.pop('credential_url')
+    return normalized
+
+
+def _cv_to_response(cv: CV) -> dict:
+    """Build complete CV response dict with all fields for frontend. Handles JSON columns properly."""
+    # Normalize arrays to frontend format
+    experiences = []
+    if cv.experiences:
+        exp_list = cv.experiences if isinstance(cv.experiences, list) else []
+        experiences = [_normalize_experience(exp) for exp in exp_list]
+    
+    educations = []
+    if cv.educations:
+        edu_list = cv.educations if isinstance(cv.educations, list) else []
+        educations = [_normalize_education(edu) for edu in edu_list]
+    
+    certifications = []
+    if cv.certifications:
+        cert_list = cv.certifications if isinstance(cv.certifications, list) else []
+        certifications = [_normalize_certification(cert) for cert in cert_list]
+    
+    # Handle languages - ensure consistent format
+    languages = []
+    if cv.languages:
+        lang_list = cv.languages if isinstance(cv.languages, list) else []
+        languages = lang_list
+    
+    # Handle projects - ensure link/url compatibility
+    projects = []
+    if cv.projects:
+        proj_list = cv.projects if isinstance(cv.projects, list) else []
+        projects = []
+        for proj in proj_list:
+            if isinstance(proj, dict):
+                normalized_proj = dict(proj)
+                # Ensure both link and url exist for compatibility
+                if 'link' in normalized_proj and 'url' not in normalized_proj:
+                    normalized_proj['url'] = normalized_proj['link']
+                elif 'url' in normalized_proj and 'link' not in normalized_proj:
+                    normalized_proj['link'] = normalized_proj['url']
+                projects.append(normalized_proj)
+            else:
+                projects.append(proj)
+    
+    return {
+        'id': cv.id,
+        'user_id': cv.user_id,
+        'full_name': cv.full_name,
+        'title': cv.title,
+        'email': cv.email,
+        'phone': cv.phone,
+        'location': cv.location,
+        'linkedin_url': cv.linkedin_url,
+        'profile_summary': cv.profile_summary,
+        'personal_info': _get_personal_info(cv),
+        'educations': educations,
+        'experiences': experiences,
+        'projects': projects,
+        'skills': cv.skills if cv.skills is not None else [],
+        'languages': languages,
+        'certifications': certifications,
+        'interests': cv.interests if cv.interests is not None else [],
+        'file_path': cv.file_path,
+        'photo_path': cv.photo_path,
+        'original_text': cv.original_text,
+        'current_version': cv.current_version or 1,
+        'is_active': cv.is_active if cv.is_active is not None else True,
+        'created_at': cv.created_at,
+        'updated_at': cv.updated_at,
+    }
+
+
 def _build_cv_data_dict(cv: CV) -> dict:
     """Build a unified CV data dict from the ORM model for AI functions."""
     return {
@@ -32,37 +235,8 @@ def _build_cv_data_dict(cv: CV) -> dict:
         'certifications': cv.certifications or [],
         'languages': cv.languages or [],
         'projects': cv.projects or [],
-        'personal_info': cv.personal_info or {},
+        'personal_info': _get_personal_info(cv),
     }
-
-
-def _sync_personal_info(cv: CV):
-    """
-    Keeps personal_info JSON in sync with the flat columns after
-    an upload or flat-field update. This is what the editor reads.
-    """
-    if cv.personal_info:
-        # personal_info is the authoritative source for the editor — sync flat cols from it
-        pi = cv.personal_info
-        cv.full_name = pi.get('name') or cv.full_name
-        cv.email = pi.get('email') or cv.email
-        cv.phone = pi.get('phone') or cv.phone
-        cv.location = pi.get('location') or cv.location
-        cv.linkedin_url = pi.get('linkedin') or cv.linkedin_url
-        cv.profile_summary = pi.get('summary') or cv.profile_summary
-    else:
-        # Build personal_info from flat cols (e.g., after file upload)
-        cv.personal_info = {
-            'name': cv.full_name or '',
-            'title': cv.title or '',
-            'email': cv.email or '',
-            'phone': cv.phone or '',
-            'location': cv.location or '',
-            'linkedin': cv.linkedin_url or '',
-            'website': '',
-            'summary': cv.profile_summary or '',
-            'photo': cv.photo_path or '',
-        }
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────
@@ -72,8 +246,9 @@ def get_all_cvs(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get all CVs for the current user."""
-    return db.query(CV).filter(CV.user_id == current_user.id).order_by(CV.updated_at.desc()).all()
+    """Get all CVs for the current user with all fields properly serialized."""
+    cvs = db.query(CV).filter(CV.user_id == current_user.id).order_by(CV.updated_at.desc()).all()
+    return [_cv_to_response(cv) for cv in cvs]
 
 
 @router.get("/{cv_id}", response_model=CVResponse)
@@ -82,11 +257,11 @@ def get_cv(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get a specific CV by ID."""
+    """Get a specific CV by ID with all fields for editor/preview."""
     cv = db.query(CV).filter(CV.id == cv_id, CV.user_id == current_user.id).first()
     if not cv:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
-    return cv
+    return _cv_to_response(cv)
 
 
 @router.post("", response_model=CVResponse)
@@ -96,29 +271,30 @@ def create_cv(
     db: Session = Depends(get_db)
 ):
     """Create a new (blank) CV."""
+    pi = cv_data.personal_info or {}
     new_cv = CV(
         user_id=current_user.id,
-        title=cv_data.title or "My CV",
-        full_name=cv_data.full_name,
-        email=cv_data.email,
-        phone=cv_data.phone,
-        location=cv_data.location,
-        linkedin_url=cv_data.linkedin_url,
-        profile_summary=cv_data.profile_summary,
-        # FIX: accept personal_info from create payload
-        personal_info=cv_data.personal_info or {},
-        educations=cv_data.educations or [],
-        experiences=cv_data.experiences or [],
-        projects=cv_data.projects or [],
-        skills=cv_data.skills or [],
-        languages=cv_data.languages or [],
-        certifications=cv_data.certifications or [],
-        current_version=cv_data.current_version or 1,
+        title=cv_data.title or pi.get('title') or pi.get('jobTitle') or "My CV",
+        full_name=cv_data.full_name or pi.get('name'),
+        email=cv_data.email or pi.get('email'),
+        phone=cv_data.phone or pi.get('phone'),
+        location=cv_data.location or pi.get('location'),
+        linkedin_url=cv_data.linkedin_url or pi.get('linkedin'),
+        profile_summary=cv_data.profile_summary or pi.get('summary'),
+        personal_info=pi if pi else None,
+        educations=cv_data.educations if cv_data.educations is not None else [],
+        experiences=cv_data.experiences if cv_data.experiences is not None else [],
+        projects=cv_data.projects if cv_data.projects is not None else [],
+        skills=cv_data.skills if cv_data.skills is not None else [],
+        languages=cv_data.languages if cv_data.languages is not None else [],
+        certifications=cv_data.certifications if cv_data.certifications is not None else [],
+        interests=cv_data.interests if cv_data.interests is not None else [],
+        current_version=1,
     )
     db.add(new_cv)
     db.commit()
     db.refresh(new_cv)
-    return new_cv
+    return _cv_to_response(new_cv)
 
 
 @router.put("/{cv_id}", response_model=CVResponse)
@@ -129,29 +305,38 @@ def update_cv(
     db: Session = Depends(get_db)
 ):
     """
-    Update a CV.
-    The editor sends personal_info as a JSON object. The flat columns
-    (full_name, email, …) are synced from it automatically.
+    Update a CV. Accepts frontend format (personal_info, experiences with position/company, etc).
+    JSON columns are stored as-is. Flat columns are synced from personal_info when provided.
     """
     cv = db.query(CV).filter(CV.id == cv_id, CV.user_id == current_user.id).first()
     if not cv:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
 
-    # if cv_data.title is not None:
-    #     cv.title = cv_data.title
-
-    # FIX: handle personal_info from editor and sync flat cols
+    # personal_info from editor — store and sync to flat cols
     if cv_data.personal_info is not None:
+        # Store personal_info as-is (preserve all fields)
         cv.personal_info = cv_data.personal_info
         pi = cv_data.personal_info
-        cv.full_name = pi.get('name') or cv.full_name
-        cv.email = pi.get('email') or cv.email
-        cv.phone = pi.get('phone') or cv.phone
-        cv.location = pi.get('location') or cv.location
-        cv.linkedin_url = pi.get('linkedin') or cv.linkedin_url
-        cv.profile_summary = pi.get('summary') or cv.profile_summary
+        # Sync flat columns from personal_info (only if provided, don't overwrite with None)
+        if 'name' in pi:
+            cv.full_name = pi.get('name') or cv.full_name
+        if 'email' in pi:
+            cv.email = pi.get('email') or cv.email
+        if 'phone' in pi:
+            cv.phone = pi.get('phone') or cv.phone
+        if 'location' in pi:
+            cv.location = pi.get('location') or cv.location
+        if 'linkedin' in pi:
+            cv.linkedin_url = pi.get('linkedin') or cv.linkedin_url
+        if 'summary' in pi:
+            cv.profile_summary = pi.get('summary') or cv.profile_summary
+        # Handle title/jobTitle
+        if 'title' in pi or 'jobTitle' in pi:
+            cv.title = pi.get('title') or pi.get('jobTitle') or cv.title
 
-    # Flat field overrides (for non-editor callers)
+    # Flat field overrides
+    if cv_data.title is not None:
+        cv.title = cv_data.title
     if cv_data.full_name is not None:
         cv.full_name = cv_data.full_name
     if cv_data.email is not None:
@@ -165,10 +350,12 @@ def update_cv(
     if cv_data.profile_summary is not None:
         cv.profile_summary = cv_data.profile_summary
 
-    # Array / JSON sections
+    # JSON sections — store as-is (list/dict from frontend)
+    # Frontend sends data in its format, we store it directly
     if cv_data.educations is not None:
         cv.educations = cv_data.educations
     if cv_data.experiences is not None:
+        # Frontend sends experiences with position/role, store as-is
         cv.experiences = cv_data.experiences
     if cv_data.projects is not None:
         cv.projects = cv_data.projects
@@ -178,11 +365,13 @@ def update_cv(
         cv.languages = cv_data.languages
     if cv_data.certifications is not None:
         cv.certifications = cv_data.certifications
+    if cv_data.interests is not None:
+        cv.interests = cv_data.interests
 
     cv.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(cv)
-    return cv
+    return _cv_to_response(cv)
 
 
 @router.delete("/{cv_id}")
@@ -262,7 +451,7 @@ def upload_cv_file(
 
         db.commit()
         db.refresh(cv)
-        return cv
+        return _cv_to_response(cv)
 
     except Exception as e:
         db.rollback()
@@ -291,8 +480,9 @@ def upload_photo(
         f.write(file.file.read())
 
     cv.photo_path = photo_path
-    if cv.personal_info:
-        cv.personal_info = {**cv.personal_info, 'photo': photo_path}
+    pi = _get_personal_info(cv)
+    pi['photo'] = photo_path
+    cv.personal_info = pi
     cv.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(cv)
@@ -359,7 +549,8 @@ def customize_cv(
         job_description=job_desc,
         matched_keywords=matched,
         missing_keywords=missing,
-        score=score,
+        ats_score=score,
+        similarity_score=score,
     )
     db.add(customization)
     db.flush()   # get customization.id
@@ -371,7 +562,7 @@ def customize_cv(
             customization_id=customization.id,
             title=s['title'],
             description=s['description'],
-            suggestion=s['suggestion'],
+            suggestion_text=s.get('suggestion', ''),
             section=s.get('section', 'general'),
         )
         db.add(obj)
@@ -467,7 +658,7 @@ def apply_ai_changes(
 
     db.commit()
     db.refresh(cv)
-    return cv
+    return _cv_to_response(cv)
 
 
 # ── Suggestions ───────────────────────────────────────────────────────────────

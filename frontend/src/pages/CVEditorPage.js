@@ -70,6 +70,7 @@ const CVEditorPage = () => {
   const [title, setTitle] = useState('My CV');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [open, setOpen] = useState({ personal: true, summary: false, experience: false, education: false, skills: false, certs: false, languages: false, projects: false });
   const [photoUploading, setPhotoUploading] = useState(false);
   const photoRef = useRef();
@@ -77,26 +78,74 @@ const CVEditorPage = () => {
   /* Load CV */
   useEffect(() => {
     if (!id) return;
+    setIsInitialLoad(true);
     cvAPI.getOne(id).then(res => {
       const d = res.data;
       setTitle(d.title || 'My CV');
+      
+      // Normalize experiences: ensure position field exists (editor uses position, preview uses role)
+      const normalizedExperiences = Array.isArray(d.experiences) ? d.experiences.map(exp => {
+        if (typeof exp === 'object' && exp !== null) {
+          const normalized = { ...exp };
+          // Ensure position exists (editor field) and role exists (preview field)
+          if (normalized.role && !normalized.position) normalized.position = normalized.role;
+          if (normalized.position && !normalized.role) normalized.role = normalized.position;
+          if (normalized.job_title && !normalized.position) {
+            normalized.position = normalized.job_title;
+            normalized.role = normalized.job_title;
+          }
+          // Ensure startDate/endDate exist
+          if (!normalized.startDate && normalized.start_date) normalized.startDate = normalized.start_date;
+          if (!normalized.endDate && normalized.end_date) normalized.endDate = normalized.end_date;
+          return normalized;
+        }
+        return exp;
+      }) : [];
+      
+      // Normalize educations: ensure frontend field names exist
+      const normalizedEducations = Array.isArray(d.educations) ? d.educations.map(edu => {
+        if (typeof edu === 'object' && edu !== null) {
+          const normalized = { ...edu };
+          // Map field names
+          if (!normalized.institution && normalized.institution_name) normalized.institution = normalized.institution_name;
+          if (!normalized.field && normalized.field_of_study) normalized.field = normalized.field_of_study;
+          if (!normalized.startDate) {
+            if (normalized.start_date) normalized.startDate = normalized.start_date;
+            else if (normalized.start_year) normalized.startDate = normalized.start_year;
+            else normalized.startDate = '';
+          }
+          if (!normalized.endDate) {
+            if (normalized.end_date) normalized.endDate = normalized.end_date;
+            else if (normalized.end_year) normalized.endDate = normalized.end_year;
+            else normalized.endDate = '';
+          }
+          return normalized;
+        }
+        return edu;
+      }) : [];
+      
       setCvData({
         ...DEFAULT_CV,
-        personal_info: d.personal_info || {},
-        experiences: d.experiences || [],
-        educations: d.educations || [],
-        skills: d.skills || [],
-        certifications: d.certifications || [],
-        languages: d.languages || [],
-        projects: d.projects || [],
+        personal_info: { ...DEFAULT_CV.personal_info, ...(d.personal_info || {}) },
+        experiences: normalizedExperiences,
+        educations: normalizedEducations,
+        skills: Array.isArray(d.skills) ? d.skills : (d.skills && typeof d.skills === 'object' ? Object.values(d.skills).flat().filter(Boolean) : []),
+        certifications: Array.isArray(d.certifications) ? d.certifications : [],
+        languages: Array.isArray(d.languages) ? d.languages : [],
+        projects: Array.isArray(d.projects) ? d.projects : [],
       });
-    }).catch(console.error);
+      // Mark initial load complete after a short delay to prevent auto-save trigger
+      setTimeout(() => setIsInitialLoad(false), 500);
+    }).catch(err => {
+      console.error('Failed to load CV:', err);
+      alert(`Failed to load CV: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
+    });
   }, [id]);
 
-  /* Auto-save */
+  /* Auto-save - skip on initial load */
   const debouncedData = useDebounce(cvData, 1200);
   useEffect(() => {
-    if (!id) return;
+    if (!id || isInitialLoad) return;
     setSaving(true);
     cvAPI.update(id, {
       title,
@@ -111,7 +160,7 @@ const CVEditorPage = () => {
       setSaving(false); setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     }).catch(() => setSaving(false));
-  }, [debouncedData, id]);
+  }, [debouncedData, id, isInitialLoad]);
 
   const update = useCallback((path, value) => {
     setCvData(prev => {
@@ -151,7 +200,14 @@ const CVEditorPage = () => {
   /* Experience helpers */
   const addExp = () => setCvData(prev => ({ ...prev, experiences: [...prev.experiences, { company: '', position: '', location: '', startDate: '', endDate: '', current: false, description: '', skills: [] }] }));
   const removeExp = i => setCvData(prev => ({ ...prev, experiences: prev.experiences.filter((_, j) => j !== i) }));
-  const updateExp = (i, field, val) => setCvData(prev => { const e = [...prev.experiences]; e[i] = { ...e[i], [field]: val }; return { ...prev, experiences: e }; });
+  const updateExp = (i, field, val) => setCvData(prev => { 
+    const e = [...prev.experiences]; 
+    e[i] = { ...e[i], [field]: val };
+    // Keep position and role in sync
+    if (field === 'position') e[i].role = val;
+    if (field === 'role') e[i].position = val;
+    return { ...prev, experiences: e }; 
+  });
 
   /* Education helpers */
   const addEdu = () => setCvData(prev => ({ ...prev, educations: [...prev.educations, { institution: '', degree: '', field: '', location: '', startDate: '', endDate: '', grade: '', description: '' }] }));
@@ -208,7 +264,7 @@ const CVEditorPage = () => {
               {/* Photo upload */}
               <div className="flex items-center gap-4">
                 <div className="relative">
-                  {cvData.personalInfo?.photo
+                  {cvData.personal_info?.photo
                     ? <img src={cvData.personalInfo.photo} alt="Profile" className="w-16 h-16 rounded-full object-cover border-2 border-primary-200" />
                     : <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 text-2xl border-2 border-dashed border-gray-300">👤</div>
                   }
@@ -243,7 +299,7 @@ const CVEditorPage = () => {
           {open.summary && (
             <div className="pt-1">
               <textarea className={TEXTAREA} rows={4} placeholder="Write a compelling 2-3 sentence summary…"
-                value={cvData.summary || ''} onChange={e => update('summary', e.target.value)} />
+                value={cvData.personal_info?.summary || ''} onChange={e => updatePI('summary', e.target.value)} />
             </div>
           )}
 
