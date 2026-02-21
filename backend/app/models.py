@@ -71,6 +71,7 @@ class CV(Base):
     profile_summary = Column(Text)
 
     # Flexible JSON Sections
+    personal_info = Column(JSONB, nullable=True)  # Editor format: {name, title, email, phone, location, linkedin, website, summary, photo}
     educations = Column(JSONB)
     experiences = Column(JSONB)
     projects = Column(JSONB)
@@ -141,6 +142,7 @@ class CVCustomization(Base):
     job_description = Column(Text, nullable=False)
 
     matched_keywords = Column(JSONB)
+    missing_keywords = Column(JSONB)  # Missing keywords from job description
     customized_snapshot = Column(JSONB)
 
     ats_score = Column(Integer)
