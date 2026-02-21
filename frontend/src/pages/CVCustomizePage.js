@@ -38,6 +38,7 @@ const CVCustomizePage = () => {
       const r = await cvAPI.getOne(cvId);
       setCV(r.data);
       setCVData(r.data.parsed_data || {});
+      // setCVData(mapBackendToPreview(r.data))
     } catch { showToast('Failed to load CV', 'error'); }
     finally { setLoading(false); }
   };
