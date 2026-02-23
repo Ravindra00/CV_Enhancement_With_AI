@@ -37,23 +37,6 @@ const CoverLetterPage = () => {
 
     const formatDate = d => new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
-    // ✅ Extract text from content object
-    const getLetterText = (content) => {
-        if (typeof content === 'string') {
-            return content;
-        }
-        if (content && typeof content === 'object') {
-            return content.text || '';
-        }
-        return '';
-    };
-
-    // ✅ Get preview text (first 100 chars)
-    const getPreview = (content) => {
-        const text = getLetterText(content);
-        return text.substring(0, 100) + (text.length > 100 ? '...' : '');
-    };
-
     return (
         <div className="min-h-screen bg-gray-50 py-8 px-6">
             <div className="max-w-5xl mx-auto">
@@ -63,10 +46,7 @@ const CoverLetterPage = () => {
                         <h1 className="text-2xl font-bold text-gray-900">Cover Letters</h1>
                         <p className="text-gray-500 text-sm mt-1">Create and manage your tailored cover letters</p>
                     </div>
-                    <button 
-                        onClick={() => setShowNew(true)} 
-                        className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl font-semibold hover:bg-primary-700 transition shadow-sm"
-                    >
+                    <button onClick={() => setShowNew(true)} className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl font-semibold hover:bg-primary-700 transition shadow-sm">
                         + New Cover Letter
                     </button>
                 </div>
@@ -95,7 +75,7 @@ const CoverLetterPage = () => {
                             <div className="flex gap-2 justify-end">
                                 <button onClick={() => setShowNew(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition">Cancel</button>
                                 <button onClick={create} disabled={creating || !newTitle.trim()} className="px-5 py-2 bg-primary text-white rounded-lg text-sm font-semibold hover:bg-primary-700 disabled:opacity-50 transition">
-                                    {creating ? 'Creating…' : 'Create'}
+                                    {creating ? 'Creating…' : 'Create & Edit'}
                                 </button>
                             </div>
                         </div>
@@ -118,64 +98,25 @@ const CoverLetterPage = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         {letters.map(letter => (
                             <div key={letter.id} className="bg-white rounded-2xl border border-gray-200 hover:shadow-card-hover transition-shadow p-5 flex flex-col gap-3">
-                                {/* Header */}
                                 <div className="flex items-start justify-between">
                                     <div className="w-10 h-10 rounded-xl bg-primary-50 flex items-center justify-center text-xl">✉️</div>
                                     <div className="flex gap-1">
-                                        <button 
-                                            onClick={() => navigate(`/cover-letters/${letter.id}`)} 
-                                            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition" 
-                                            title="View"
-                                        >
-                                            👁️
-                                        </button>
-                                        <button 
-                                            onClick={() => navigate(`/cover-letters/${letter.id}/edit`)} 
-                                            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition" 
-                                            title="Edit"
-                                        >
-                                            ✏️
-                                        </button>
-                                        <button 
-                                            onClick={() => del(letter.id)} 
-                                            className="p-1.5 rounded-lg hover:bg-red-50 text-gray-500 hover:text-red-500 transition" 
-                                            title="Delete"
-                                        >
-                                            🗑
-                                        </button>
+                                        <button onClick={() => navigate(`/cover-letters/${letter.id}`)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition" title="Edit">✏️</button>
+                                        <button onClick={() => del(letter.id)} className="p-1.5 rounded-lg hover:bg-red-50 text-gray-500 hover:text-red-500 transition" title="Delete">🗑</button>
                                     </div>
                                 </div>
-
-                                {/* Title */}
                                 <div>
                                     <h3 className="font-semibold text-gray-900 truncate">{letter.title}</h3>
+                                    {letter.content?.company && <p className="text-sm text-gray-500 mt-0.5">→ {letter.content.company}{letter.content.role ? ` · ${letter.content.role}` : ''}</p>}
                                 </div>
-
-                                {/* Preview */}
-                                <div className="flex-grow">
-                                    <p className="text-sm text-gray-600 line-clamp-3">
-                                        {getPreview(letter.content) || '(Empty)'}
-                                    </p>
-                                </div>
-
-                                {/* Footer */}
-                                <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
+                                <div className="mt-auto pt-2 border-t border-gray-100 flex items-center justify-between">
                                     <span className="text-xs text-gray-400">{formatDate(letter.updated_at)}</span>
-                                    <button 
-                                        onClick={() => navigate(`/cover-letters/${letter.id}`)} 
-                                        className="text-xs font-semibold text-primary hover:underline"
-                                    >
-                                        View →
-                                    </button>
+                                    <button onClick={() => navigate(`/cover-letters/${letter.id}`)} className="text-xs font-semibold text-primary hover:underline">Edit →</button>
                                 </div>
                             </div>
                         ))}
-                        
                         {/* New card */}
-                        <button 
-                            onClick={() => setShowNew(true)} 
-                            className="h-40 border-2 border-dashed border-gray-300 rounded-2xl flex flex-col items-center justify-center gap-2 text-gray-400 hover:border-primary hover:text-primary transition"
-                        >
+                        <button onClick={() => setShowNew(true)} className="h-40 border-2 border-dashed border-gray-300 rounded-2xl flex flex-col items-center justify-center gap-2 text-gray-400 hover:border-primary hover:text-primary transition">
                             <span className="text-3xl">+</span>
                             <span className="text-sm font-medium">New Cover Letter</span>
                         </button>

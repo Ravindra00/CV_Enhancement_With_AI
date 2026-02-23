@@ -12,6 +12,8 @@ import CoverLetterPage from './pages/CoverLetterPage';
 import CoverLetterEditorPage from './pages/CoverLetterEditorPage';
 import CoverLetterGeneratorPage from './pages/CoverLetterGeneratorPage';
 import JobTrackerPage from './pages/JobTrackerPage';
+import CoverLetterViewPage from './pages/CoverLetterViewPage';
+import NotFoundPage from './pages/NotFoundPage';
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -43,6 +45,7 @@ function App() {
           {/* Cover Letters */}
           <Route path="/cover-letters" element={<ProtectedRoute><CoverLetterPage /></ProtectedRoute>} />
           <Route path="/cover-letters/:id" element={<ProtectedRoute><CoverLetterEditorPage /></ProtectedRoute>} />
+          <Route path="/cover-letter/:id" element={<ProtectedRoute><CoverLetterViewPage /></ProtectedRoute>} />
           <Route path="/cover-letter/new" element={<ProtectedRoute><CoverLetterGeneratorPage /></ProtectedRoute>} />
 
           {/* Job Tracker */}

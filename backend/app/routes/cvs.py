@@ -609,6 +609,58 @@ def enhance_cv_for_job_endpoint(
     }
 
 
+# @router.post("/{cv_id}/apply-ai-changes", response_model=CVResponse)
+# def apply_ai_changes(
+#     cv_id: int,
+#     request: ApplyAIChangesRequest,
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     FIX: NEW ENDPOINT
+#     Apply AI-enhanced CV data back to the database.
+#     The frontend calls enhance-for-job → user reviews → calls this to save.
+#     """
+#     cv = db.query(CV).filter(CV.id == cv_id, CV.user_id == current_user.id).first()
+#     if not cv:
+#         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
+
+#     enhanced = request.enhanced_cv
+
+#     # Update all sections from the enhanced payload
+#     if 'personal_info' in enhanced:
+#         cv.personal_info = enhanced['personal_info']
+#         pi = enhanced['personal_info']
+#         cv.full_name = pi.get('name') or cv.full_name
+#         cv.email = pi.get('email') or cv.email
+#         cv.phone = pi.get('phone') or cv.phone
+#         cv.location = pi.get('location') or cv.location
+#         cv.linkedin_url = pi.get('linkedin') or cv.linkedin_url
+#         cv.profile_summary = pi.get('summary') or cv.profile_summary
+
+#     if 'profile_summary' in enhanced:
+#         cv.profile_summary = enhanced['profile_summary']
+#     if 'experiences' in enhanced:
+#         cv.experiences = enhanced['experiences']
+#     if 'educations' in enhanced:
+#         cv.educations = enhanced['educations']
+#     if 'skills' in enhanced:
+#         cv.skills = enhanced['skills']
+#     if 'certifications' in enhanced:
+#         cv.certifications = enhanced['certifications']
+#     if 'languages' in enhanced:
+#         cv.languages = enhanced['languages']
+#     if 'projects' in enhanced:
+#         cv.projects = enhanced['projects']
+
+#     cv.current_version = (cv.current_version or 1) + 1
+#     cv.updated_at = datetime.utcnow()
+
+#     db.commit()
+#     db.refresh(cv)
+#     return _cv_to_response(cv)
+
+
 @router.post("/{cv_id}/apply-ai-changes", response_model=CVResponse)
 def apply_ai_changes(
     cv_id: int,
@@ -617,49 +669,98 @@ def apply_ai_changes(
     db: Session = Depends(get_db)
 ):
     """
-    FIX: NEW ENDPOINT
     Apply AI-enhanced CV data back to the database.
     The frontend calls enhance-for-job → user reviews → calls this to save.
+    
+    ✅ FIXED: Proper error handling, no data loss, updates personal_info correctly
     """
-    cv = db.query(CV).filter(CV.id == cv_id, CV.user_id == current_user.id).first()
-    if not cv:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
+    try:
+        cv = db.query(CV).filter(CV.id == cv_id, CV.user_id == current_user.id).first()
+        if not cv:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
 
-    enhanced = request.enhanced_cv
+        enhanced = request.enhanced_cv
+        
+        # Validate enhanced is a dict
+        if not isinstance(enhanced, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="enhanced_cv must be a dictionary"
+            )
 
-    # Update all sections from the enhanced payload
-    if 'personal_info' in enhanced:
-        cv.personal_info = enhanced['personal_info']
-        pi = enhanced['personal_info']
-        cv.full_name = pi.get('name') or cv.full_name
-        cv.email = pi.get('email') or cv.email
-        cv.phone = pi.get('phone') or cv.phone
-        cv.location = pi.get('location') or cv.location
-        cv.linkedin_url = pi.get('linkedin') or cv.linkedin_url
-        cv.profile_summary = pi.get('summary') or cv.profile_summary
+        # ── Update personal_info section ──────────────────────────────────────
+        if 'personal_info' in enhanced and isinstance(enhanced['personal_info'], dict):
+            pi = enhanced['personal_info']
+            
+            # Store the entire personal_info object (preserves all fields)
+            cv.personal_info = pi
+            
+            # Sync flat columns from personal_info (use direct assignment, not 'or')
+            # This allows updating to None or empty string
+            if 'name' in pi:
+                cv.full_name = pi.get('name')
+            if 'email' in pi:
+                cv.email = pi.get('email')
+            if 'phone' in pi:
+                cv.phone = pi.get('phone')
+            if 'location' in pi:
+                cv.location = pi.get('location')
+            if 'linkedin' in pi:
+                cv.linkedin_url = pi.get('linkedin')
+            if 'summary' in pi:
+                cv.profile_summary = pi.get('summary')
+            if 'title' in pi or 'jobTitle' in pi:
+                cv.title = pi.get('title') or pi.get('jobTitle') or cv.title
 
-    if 'profile_summary' in enhanced:
-        cv.profile_summary = enhanced['profile_summary']
-    if 'experiences' in enhanced:
-        cv.experiences = enhanced['experiences']
-    if 'educations' in enhanced:
-        cv.educations = enhanced['educations']
-    if 'skills' in enhanced:
-        cv.skills = enhanced['skills']
-    if 'certifications' in enhanced:
-        cv.certifications = enhanced['certifications']
-    if 'languages' in enhanced:
-        cv.languages = enhanced['languages']
-    if 'projects' in enhanced:
-        cv.projects = enhanced['projects']
+        # ── Update profile_summary (if provided separately) ─────────────────────
+        if 'profile_summary' in enhanced:
+            cv.profile_summary = enhanced['profile_summary']
 
-    cv.current_version = (cv.current_version or 1) + 1
-    cv.updated_at = datetime.utcnow()
+        # ── Update JSON array sections ──────────────────────────────────────────
+        # Store directly without type checking (preserve whatever format frontend sends)
+        if 'experiences' in enhanced:
+            cv.experiences = enhanced['experiences'] if enhanced['experiences'] else []
+        
+        if 'educations' in enhanced:
+            cv.educations = enhanced['educations'] if enhanced['educations'] else []
+        
+        if 'skills' in enhanced:
+            cv.skills = enhanced['skills'] if enhanced['skills'] else []
+        
+        if 'certifications' in enhanced:
+            cv.certifications = enhanced['certifications'] if enhanced['certifications'] else []
+        
+        if 'languages' in enhanced:
+            cv.languages = enhanced['languages'] if enhanced['languages'] else []
+        
+        if 'projects' in enhanced:
+            cv.projects = enhanced['projects'] if enhanced['projects'] else []
 
-    db.commit()
-    db.refresh(cv)
-    return _cv_to_response(cv)
+        # ── Update version & timestamp ──────────────────────────────────────────
+        cv.current_version = (cv.current_version or 1) + 1
+        cv.updated_at = datetime.utcnow()
 
+        # ── Commit to database ──────────────────────────────────────────────────
+        db.commit()
+        db.refresh(cv)
+        
+        return _cv_to_response(cv)
+    
+    except HTTPException:
+        # Re-raise HTTP exceptions (validation errors, not found, etc)
+        raise
+    except Exception as e:
+        # Catch unexpected errors and return informative response
+        db.rollback()
+        import traceback
+        error_detail = f"Failed to apply changes: {str(e)}"
+        print(f"Error in apply_ai_changes: {error_detail}")
+        print(traceback.format_exc())
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=error_detail
+        )
 
 # ── Suggestions ───────────────────────────────────────────────────────────────
 
