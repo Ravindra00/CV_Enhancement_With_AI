@@ -187,10 +187,45 @@ class CVResponse(BaseModel):
         from_attributes = True
 
 
-class ApplyAIChangesRequest(BaseModel):
-    """Payload for applying AI-enhanced CV data back to the database."""
-    enhanced_cv: Dict[str, Any]
+# class ApplyAIChangesRequest(BaseModel):
+#     """Payload for applying AI-enhanced CV data back to the database."""
+#     enhanced_cv: Dict[str, Any]
 
+# ─── AI Changes Schema ──────────────────────────────────────────────────────
+
+class ApplyAIChangesRequest(BaseModel):
+    """Request to apply AI-enhanced CV data to the database."""
+    enhanced_cv: Dict[str, Any]
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "enhanced_cv": {
+                    "personal_info": {
+                        "name": "Rabindra Pandey",
+                        "email": "ravindrapandey2073@gmail.com",
+                        "phone": "+49 15210893413",
+                        "location": "Munich, Germany",
+                        "linkedin": "linkedin.com/in/Rabindra",
+                        "summary": "Enhanced professional summary..."
+                    },
+                    "experiences": [
+                        {
+                            "company": "TechCorp",
+                            "position": "Senior DBA",
+                            "startDate": "06/2022",
+                            "endDate": "present",
+                            "description": "Enhanced job description..."
+                        }
+                    ],
+                    "educations": [],
+                    "skills": [],
+                    "certifications": [],
+                    "languages": [],
+                    "projects": []
+                }
+            }
+        }
 
 # ───────────────────────────────────────────────────────────────
 # CV VERSION RESPONSE
@@ -282,15 +317,53 @@ class CoverLetterUpdate(BaseModel):
     content: Optional[Dict[str, Any]] = None
 
 
+# class CoverLetterResponse(BaseModel):
+#     id: int
+#     user_id: int
+#     cv_id: Optional[int] 
+#     title: str
+#     content: Optional[CoverLetterContent]
+#     created_at: datetime
+#     updated_at: datetime
+
+#     class Config:
+#         from_attributes = True
+
 class CoverLetterResponse(BaseModel):
     id: int
     user_id: int
-    cv_id: Optional[int]
+    cv_id: Optional[int] = None
     title: str
-    content: Optional[CoverLetterContent]
+    content: Dict[str, Any]  # Full content object
+    content_text: Optional[str] = None  # ✅ NEW: Extracted text for display
     created_at: datetime
     updated_at: datetime
-
+    
+    @classmethod
+    def from_orm(cls, obj):
+        """Extract text from content for easy frontend access"""
+        # Get the full response data
+        data = {
+            'id': obj.id,
+            'user_id': obj.user_id,
+            'cv_id': obj.cv_id,
+            'title': obj.title,
+            'content': obj.content,  # Full object
+            'created_at': obj.created_at,
+            'updated_at': obj.updated_at,
+        }
+        
+        # ✅ Extract text from content
+        if isinstance(obj.content, dict) and 'text' in obj.content:
+            data['content_text'] = obj.content['text']
+        else:
+            data['content_text'] = None
+        
+        # Create instance using parent's from_orm
+        instance = super().from_orm(obj)
+        instance.content_text = data['content_text']
+        return instance
+    
     class Config:
         from_attributes = True
 

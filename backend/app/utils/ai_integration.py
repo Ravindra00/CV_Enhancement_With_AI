@@ -1,196 +1,441 @@
 """
 AI Integration Module
 Handles LLM API calls for CV enhancement and cover letter generation
-Uses Groq API (free tier available)
+Uses Groq API SDK (free tier available)
+
+Note: Groq frequently deprecates models. This version tries multiple models
+in order until one works, so it stays current automatically.
 """
 
 import os
 import json
-import requests
 from typing import Optional, Dict, List
-from bs4 import BeautifulSoup
+from datetime import datetime
 
-# Groq API endpoint
-GROQ_API = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+# ✅ Load environment variables
+from dotenv import load_dotenv
+load_dotenv()
+
+# ✅ Initialize Groq client
+from groq import Groq
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+if not GROQ_API_KEY:
+    print("⚠️  WARNING: GROQ_API_KEY not set! AI features will not work.")
+    client = None
+else:
+    print("✅ GROQ_API_KEY loaded")
+    client = Groq(api_key=GROQ_API_KEY)
+
+# ✅ Models to try (in order of preference)
+# Keep this list updated with current Groq models
+# Check: https://console.groq.com/docs/models
+GROQ_MODELS = [
+    # "mixtral-8x7b-32k",           # Try this first
+    # "mixtral-8x7b-instruct-v0.1", # Alternative
+    # "mixtral-8x7b-instruct",      # Another alternative
+    # "llama2-70b-4096", 
+    "openai/gpt-oss-120b"                    # Fallback
+]
+
+# Will be set after first successful call
+WORKING_MODEL = None
 
 
-class LLMProvider:
-    """Handles communication with Groq API"""
+def _get_working_model():
+    """
+    Get a working model by trying each one in the list.
+    Caches the result so we don't keep trying bad models.
+    """
+    global WORKING_MODEL
     
-    @staticmethod
-    def generate_cover_letter(cv_data: Dict, job_description: str, user_name: str) -> str:
-        """Generate a cover letter using Groq API"""
+    # If we already found a working model, use it
+    if WORKING_MODEL:
+        return WORKING_MODEL
+    
+    # If no client, we can't test
+    if not client:
+        print("⚠️  No Groq client available")
+        return None
+    
+    print("🔍 Testing available Groq models...")
+    
+    # Try each model
+    for model in GROQ_MODELS:
         try:
-            prompt = f"""Based on this CV data and job description, write a professional cover letter:
+            print(f"   Trying {model}...", end=" ")
+            
+            # Quick test with minimal request
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": "Hi"}],
+                max_tokens=10,
+                temperature=0.7
+            )
+            
+            # If we got here, the model works!
+            print("✅ Works!")
+            WORKING_MODEL = model
+            return model
+            
+        except Exception as e:
+            error_msg = str(e)
+            if "decommissioned" in error_msg.lower():
+                print("❌ Decommissioned")
+            elif "does not exist" in error_msg.lower():
+                print("❌ Doesn't exist")
+            else:
+                print(f"❌ Error: {error_msg[:50]}")
+            continue
+    
+    print("❌ No working models found! Using fallback template.")
+    return None
 
-CV Summary:
-- Name: {user_name}
-- Experience: Professional background in relevant fields
 
-Job Description:
+# ============================================================================
+# COVER LETTER GENERATION
+# ============================================================================
+
+def generate_cover_letter(cv_data: dict, job_description: str, user_name: str = "User") -> str:
+    """
+    Generate a professional cover letter using Groq API.
+    Returns plain text string (not JSON object).
+    
+    Args:
+        cv_data: Dictionary containing CV information
+        job_description: Job description text
+        user_name: Name of the person
+    
+    Returns:
+        Plain text cover letter string
+    """
+    try:
+        print(f"\n{'='*70}")
+        print(f"🤖 [generate_cover_letter] Starting...")
+        print(f"{'='*70}")
+        
+        # ✅ Check if client is initialized
+        if not client:
+            print("⚠️  Groq client not initialized, using fallback")
+            return _generate_fallback_cover_letter(user_name, job_description)
+        
+        # Get a working model
+        model = _get_working_model()
+        if not model:
+            print("⚠️  No working Groq model available, using fallback")
+            return _generate_fallback_cover_letter(user_name, job_description)
+        
+        # Build CV summary
+        name = cv_data.get('full_name', user_name)
+        summary = cv_data.get('summary', '')
+        
+        print(f"   Name: {name}")
+        print(f"   Summary: {summary[:50]}..." if summary else "   Summary: (empty)")
+        
+        # Build skills list
+        skills = cv_data.get('skills', [])
+        skills_text = ""
+        if skills:
+            if isinstance(skills, list):
+                skill_names = [
+                    s.get('name', str(s)) if isinstance(s, dict) else str(s)
+                    for s in skills
+                ]
+                skills_text = ", ".join(skill_names[:10])
+            else:
+                skills_text = str(skills)
+        
+        print(f"   Skills: {skills_text[:80]}...")
+        
+        # Build experience summary
+        experiences = cv_data.get('experiences', [])
+        experience_text = ""
+        if experiences and isinstance(experiences, list) and len(experiences) > 0:
+            exp = experiences[0]
+            if isinstance(exp, dict):
+                company = exp.get('company', 'my previous company')
+                position = exp.get('position', exp.get('role', 'position'))
+                experience_text = f"As a {position} at {company}, I"
+            else:
+                experience_text = "In my previous roles, I"
+        else:
+            experience_text = "In my professional experience, I"
+        
+        print(f"   Experience: {experience_text}")
+        
+        # Build prompt
+        prompt = f"""You are a professional cover letter writer. 
+
+Generate a professional, compelling cover letter based on this information:
+
+**Candidate Information:**
+- Name: {name}
+- Professional Summary: {summary}
+- Key Skills: {skills_text}
+- Background: {experience_text}
+
+**Job Description:**
 {job_description}
 
-Write a compelling, personalized cover letter (300-400 words):"""
+Write a professional cover letter that:
+1. Opens with a strong hook
+2. Highlights relevant skills that match the job
+3. Shows enthusiasm for the role
+4. Closes with a call to action
+5. Is 3-4 paragraphs long
+6. Uses professional but personable tone
 
-            response = LLMProvider._groq_request(prompt)
-            if not response:
-                response = LLMProvider._generate_basic_cover_letter(cv_data, job_description, user_name)
+Return ONLY the cover letter text, no headers or metadata. Start directly with "Dear Hiring Manager," or similar."""
+
+        print(f"\n📤 Sending to Groq API...")
+        print(f"   Model: {model}")
+        print(f"   Max tokens: 1000")
+        
+        # ✅ Call Groq API using SDK
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1000,
+            temperature=0.7
+        )
+        
+        print(f"\n✅ Response from Groq!")
+        
+        # Extract text from response
+        if response.choices and len(response.choices) > 0:
+            letter_text = response.choices[0].message.content
             
-            return response if response else "Unable to generate cover letter. Please try again."
-            
-        except Exception as e:
-            print(f"Error generating cover letter: {str(e)}")
-            return LLMProvider._generate_basic_cover_letter(cv_data, job_description, user_name)
-    
-    @staticmethod
-    def _groq_request(prompt: str) -> Optional[str]:
-        """Call Groq API"""
-        try:
-            if not GROQ_API_KEY:
-                print("Groq API key not configured")
-                return None
-            
-            headers = {
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "model": "gemma2-9b-it",
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 1024,
-                "temperature": 0.7
-            }
-            
-            response = requests.post(GROQ_API, json=payload, headers=headers, timeout=30)
-            
-            if response.status_code == 200:
-                data = response.json()
-                return data.get('choices', [{}])[0].get('message', {}).get('content', '').strip()
+            if letter_text:
+                letter_text = letter_text.strip()
+                print(f"   Generated text: {len(letter_text)} chars")
+                print(f"   Tokens used: {response.usage.total_tokens}")
+                print(f"\n✅ SUCCESS! Generated {len(letter_text)} chars")
+                print(f"   First 100 chars: {letter_text[:100]}...")
+                print(f"{'='*70}\n")
+                return letter_text
             else:
-                print(f"Groq API error: {response.status_code}")
-                return None
-            
-        except Exception as e:
-            print(f"Groq API error: {str(e)}")
-            return None
+                print(f"⚠️  Empty response from API, using fallback")
+                return _generate_fallback_cover_letter(name, job_description)
+        else:
+            print(f"❌ No choices in response!")
+            return _generate_fallback_cover_letter(name, job_description)
     
-    @staticmethod
-    def _generate_basic_cover_letter(cv_data: Dict, job_description: str, user_name: str) -> str:
-        """Fallback: Generate basic cover letter using templates"""
-        return f"""Dear Hiring Manager,
+    except Exception as e:
+        print(f"❌ ERROR in generate_cover_letter:")
+        print(f"   Type: {type(e).__name__}")
+        print(f"   Message: {str(e)[:200]}")
+        return _generate_fallback_cover_letter(user_name, job_description)
 
-I am writing to express my strong interest in the position described in your job posting. With my professional background and experience, I am confident in my ability to contribute effectively to your team.
 
-Throughout my career, I have developed expertise in several key areas that align with your requirements. My experience has equipped me with the technical skills and professional qualities necessary to excel in this role.
+def _generate_fallback_cover_letter(name: str, job_description: str) -> str:
+    """
+    Generate a basic cover letter template when AI is unavailable.
+    Returns plain text string.
+    """
+    date = datetime.now().strftime("%B %d, %Y")
+    
+    fallback = f"""{date}
 
-I am particularly drawn to this opportunity because it combines my passion for innovation with the chance to work on meaningful projects. I am excited about the prospect of bringing my skills and dedication to your organization.
+Dear Hiring Manager,
 
-Thank you for considering my application. I look forward to discussing how I can contribute to your team's success.
+I am writing to express my strong interest in the position outlined in your job description. With my professional background and comprehensive skill set, I am confident that I can contribute meaningfully to your team.
+
+My experience has equipped me with a deep understanding of the key responsibilities and requirements you're seeking. I am particularly drawn to this opportunity because of your organization's commitment to excellence and innovation in the industry.
+
+I would welcome the opportunity to discuss how my background, skills, and enthusiasm align with your team's needs. Thank you for considering my application, and I look forward to hearing from you.
 
 Sincerely,
-{user_name}"""
-
-
-class JobDescriptionExtractor:
-    """Extracts job description from URLs using web scraping"""
+{name}
+"""
     
-    @staticmethod
-    def extract_from_url(url: str) -> Optional[str]:
-        """Extract job description from LinkedIn or Indeed URLs"""
-        try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-            }
-            
-            response = requests.get(url, headers=headers, timeout=10)
-            if response.status_code != 200:
-                return None
-            
-            soup = BeautifulSoup(response.content, 'html.parser')
-            text = soup.get_text()
-            return text[:2000] if text else None
-            
-        except Exception as e:
-            print(f"Error extracting job description: {str(e)}")
+    print(f"\n📝 Using fallback cover letter ({len(fallback)} chars)")
+    return fallback
+
+
+# ============================================================================
+# JOB DESCRIPTION EXTRACTION
+# ============================================================================
+
+def extract_job_description(url: str) -> Optional[str]:
+    """
+    Extract job description from URL using web scraping.
+    
+    Args:
+        url: Job posting URL (LinkedIn, Indeed, etc)
+    
+    Returns:
+        Extracted job description text or None
+    """
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        
+        print(f"\n🔍 Extracting job description from: {url}")
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            print(f"❌ Failed to fetch URL (status {response.status_code})")
             return None
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        text = soup.get_text()
+        
+        if text:
+            extracted = text[:2000]
+            print(f"✅ Extracted {len(extracted)} chars from {url}")
+            return extracted
+        else:
+            print(f"❌ No text found in webpage")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Error extracting job description: {str(e)}")
+        return None
 
 
-class CVAnalyzer:
-    """Analyzes CV content and generates enhancements using Groq API"""
+# ============================================================================
+# CV ANALYSIS
+# ============================================================================
+
+def analyze_cv(cv_data: Dict) -> Dict:
+    """
+    Analyze CV and generate insights using Groq API.
     
-    @staticmethod
-    def analyze_cv(cv_data: Dict) -> Dict:
-        """Analyze CV and generate insights using Groq API"""
-        try:
-            personal_info = cv_data.get('personal_info', {})
-            experiences = cv_data.get('experiences', [])
-            educations = cv_data.get('educations', [])
-            skills = cv_data.get('skills', [])
-            
-            # Extract skill names
-            skill_names = []
-            for skill in skills:
-                if isinstance(skill, dict):
-                    skill_names.append(skill.get('name', ''))
-                else:
-                    skill_names.append(str(skill))
-            
-            cv_summary = f"""
+    Args:
+        cv_data: Dictionary containing CV information
+    
+    Returns:
+        Dictionary with analysis results
+    """
+    try:
+        print(f"\n🔍 [analyze_cv] Starting...")
+        
+        if not client:
+            print("⚠️  Groq client not initialized")
+            return {
+                'analysis': {'strengths': ['Profile complete'], 'improvements': [], 'score': 60},
+                'status': 'api_error'
+            }
+        
+        model = _get_working_model()
+        if not model:
+            return {
+                'analysis': {'strengths': ['Profile complete'], 'improvements': [], 'score': 60},
+                'status': 'api_error'
+            }
+        
+        personal_info = cv_data.get('personal_info', {})
+        experiences = cv_data.get('experiences', [])
+        educations = cv_data.get('educations', [])
+        skills = cv_data.get('skills', [])
+        
+        # Extract skill names
+        skill_names = []
+        for skill in skills:
+            if isinstance(skill, dict):
+                skill_names.append(skill.get('name', ''))
+            else:
+                skill_names.append(str(skill))
+        
+        cv_summary = f"""
 Name: {personal_info.get('name', 'Not provided')}
 Skills: {', '.join(skill_names[:10])}
 Experience: {len(experiences)} positions
 Education: {len(educations)} degrees
 """
-            
-            prompt = f"""Analyze this CV and provide insights in JSON format with 'strengths' (list), 'improvements' (list), and 'score' (0-100):
+        
+        prompt = f"""Analyze this CV and provide insights in JSON format with 'strengths' (list), 'improvements' (list), and 'score' (0-100):
 
 CV Summary:
 {cv_summary}
 
-Respond with ONLY valid JSON:
-{{"strengths": ["..."], "improvements": ["..."], "score": 75}}
+Respond with ONLY valid JSON, no other text:
+{{"strengths": ["strength1", "strength2"], "improvements": ["improvement1", "improvement2"], "score": 75}}
 """
+        
+        print(f"📤 Sending to Groq API...")
+        
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=500,
+            temperature=0.7
+        )
+        
+        if response.choices and len(response.choices) > 0:
+            response_text = response.choices[0].message.content
             
-            response = LLMProvider._groq_request(prompt)
-            if response:
-                try:
-                    response_clean = response.replace('```json', '').replace('```', '').strip()
-                    analysis = json.loads(response_clean)
-                    return {'analysis': analysis, 'status': 'success'}
-                except json.JSONDecodeError:
-                    return {
-                        'analysis': {'strengths': ['Profile complete'], 'improvements': [], 'score': 75},
-                        'status': 'parse_error'
-                    }
-            
-            return {
-                'analysis': {'strengths': ['Profile complete'], 'improvements': [], 'score': 0},
-                'status': 'api_error'
-            }
-            
-        except Exception as e:
-            return {
-                'analysis': {'strengths': [], 'improvements': [], 'score': 0},
-                'status': 'error',
-                'error': str(e)
-            }
+            try:
+                # Clean the response
+                response_clean = response_text.replace('```json', '').replace('```', '').strip()
+                analysis = json.loads(response_clean)
+                print(f"✅ Analysis parsed successfully")
+                return {'analysis': analysis, 'status': 'success'}
+            except json.JSONDecodeError as e:
+                print(f"⚠️  Failed to parse JSON: {str(e)}")
+                return {
+                    'analysis': {'strengths': ['Profile complete'], 'improvements': [], 'score': 60},
+                    'status': 'parse_error'
+                }
+        
+        print(f"❌ No content in response")
+        return {
+            'analysis': {'strengths': ['Profile complete'], 'improvements': [], 'score': 0},
+            'status': 'api_error'
+        }
+        
+    except Exception as e:
+        print(f"❌ ERROR in analyze_cv: {str(e)}")
+        return {
+            'analysis': {'strengths': [], 'improvements': [], 'score': 0},
+            'status': 'error',
+            'error': str(e)
+        }
+
+
+# ============================================================================
+# CV ENHANCEMENT
+# ============================================================================
+
+def enhance_cv_for_job(cv_data: Dict, job_description: str) -> Dict:
+    """
+    Create enhanced CV tailored to job description.
     
-    @staticmethod
-    def enhance_cv_for_job(cv_data: Dict, job_description: str) -> Dict:
-        """Create enhanced CV tailored to job description"""
-        try:
-            experiences = cv_data.get('experiences', [])
-            
-            # Create experience summary
-            exp_summary = "\n".join([
-                f"- {e.get('position', '')} at {e.get('company', '')} ({e.get('startDate', '')} to {e.get('endDate', '')})"
-                for e in experiences[:3]
-            ])
-            
-            prompt = f"""Based on this job description, optimize the CV experiences to match the role better.
-Return JSON with 'enhanced_descriptions' array of improved experience descriptions:
+    Args:
+        cv_data: Dictionary containing CV information
+        job_description: Target job description
+    
+    Returns:
+        Dictionary with enhanced CV data
+    """
+    try:
+        print(f"\n✨ [enhance_cv_for_job] Starting...")
+        
+        if not client:
+            print("⚠️  Groq client not initialized")
+            return {'enhanced_cv': cv_data, 'status': 'api_error'}
+        
+        model = _get_working_model()
+        if not model:
+            return {'enhanced_cv': cv_data, 'status': 'api_error'}
+        
+        experiences = cv_data.get('experiences', [])
+        
+        # Create experience summary
+        exp_summary = "\n".join([
+            f"- {e.get('position', '')} at {e.get('company', '')} ({e.get('startDate', '')} to {e.get('endDate', '')})"
+            for e in experiences[:3]
+        ])
+        
+        prompt = f"""Based on this job description, optimize the CV experiences to better match the role.
+Return JSON with 'enhanced_experiences' array where each item has 'description' field with improved text:
 
 Job Description:
 {job_description[:1000]}
@@ -198,49 +443,45 @@ Job Description:
 Current Experiences:
 {exp_summary}
 
-Improve each to highlight relevant skills. Return ONLY JSON:
-{{"enhanced_descriptions": ["description1", "description2"]}}
+For each experience, improve the description to highlight the most relevant skills and achievements.
+Return ONLY JSON, no other text:
+{{"enhanced_experiences": [{{"description": "improved description 1"}}, {{"description": "improved description 2"}}]}}
 """
+        
+        print(f"📤 Sending to Groq API...")
+        
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1000,
+            temperature=0.7
+        )
+        
+        if response.choices and len(response.choices) > 0:
+            response_text = response.choices[0].message.content
             
-            response = LLMProvider._groq_request(prompt)
-            if response:
-                try:
-                    response_clean = response.replace('```json', '').replace('```', '').strip()
-                    enhanced = json.loads(response_clean)
-                    
-                    # Build enhanced CV data
-                    enhanced_cv = cv_data.copy()
-                    if 'enhanced_descriptions' in enhanced and enhanced_cv.get('experiences'):
-                        for i, desc in enumerate(enhanced['enhanced_descriptions']):
-                            if i < len(enhanced_cv['experiences']):
-                                enhanced_cv['experiences'][i]['description'] = desc
-                    
-                    return {'enhanced_cv': enhanced_cv, 'status': 'success'}
-                except json.JSONDecodeError:
-                    return {'enhanced_cv': cv_data, 'status': 'parse_error'}
-            
-            return {'enhanced_cv': cv_data, 'status': 'api_error'}
-            
-        except Exception as e:
-            return {'enhanced_cv': cv_data, 'status': 'error', 'error': str(e)}
-
-
-# Convenience functions
-def generate_cover_letter(cv_data: Dict, job_description: str, user_name: str) -> str:
-    """Generate a cover letter"""
-    return LLMProvider.generate_cover_letter(cv_data, job_description, user_name)
-
-
-def extract_job_description(url: str) -> Optional[str]:
-    """Extract job description from URL"""
-    return JobDescriptionExtractor.extract_from_url(url)
-
-
-def analyze_cv(cv_data: Dict) -> Dict:
-    """Analyze CV using Groq API"""
-    return CVAnalyzer.analyze_cv(cv_data)
-
-
-def enhance_cv_for_job(cv_data: Dict, job_description: str) -> Dict:
-    """Create enhanced CV for specific job"""
-    return CVAnalyzer.enhance_cv_for_job(cv_data, job_description)
+            try:
+                response_clean = response_text.replace('```json', '').replace('```', '').strip()
+                enhanced = json.loads(response_clean)
+                
+                # Build enhanced CV data
+                enhanced_cv = cv_data.copy()
+                
+                if 'enhanced_experiences' in enhanced and enhanced_cv.get('experiences'):
+                    for i, exp_data in enumerate(enhanced['enhanced_experiences']):
+                        if i < len(enhanced_cv['experiences']):
+                            if 'description' in exp_data:
+                                enhanced_cv['experiences'][i]['description'] = exp_data['description']
+                
+                print(f"✅ CV enhanced successfully")
+                return {'enhanced_cv': enhanced_cv, 'status': 'success'}
+            except json.JSONDecodeError as e:
+                print(f"⚠️  Failed to parse JSON: {str(e)}")
+                return {'enhanced_cv': cv_data, 'status': 'parse_error'}
+        
+        print(f"❌ No content in response")
+        return {'enhanced_cv': cv_data, 'status': 'api_error'}
+        
+    except Exception as e:
+        print(f"❌ ERROR in enhance_cv_for_job: {str(e)}")
+        return {'enhanced_cv': cv_data, 'status': 'error', 'error': str(e)}

@@ -1,151 +1,201 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { coverLetterAPI, cvAPI } from '../services/api';
-
-const DEFAULT_CONTENT = {
-    recipient_name: '', company: '', role: '', date: '',
-    opening: '', body: '', closing: '', signature: '',
-};
-
-const INPUT = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300';
-const TEXTAREA = `${INPUT} resize-none`;
-const LABEL = 'block text-xs font-semibold text-gray-600 mb-1';
-
-function useDebounce(v, d) {
-    const [val, setVal] = useState(v);
-    useEffect(() => { const t = setTimeout(() => setVal(v), d); return () => clearTimeout(t); }, [v, d]);
-    return val;
-}
+import { coverLetterAPI } from '../services/api';
 
 const CoverLetterEditorPage = () => {
-    const { id } = useParams();
-    const navigate = useNavigate();
-    const [title, setTitle] = useState('My Cover Letter');
-    const [content, setContent] = useState(DEFAULT_CONTENT);
-    const [cvData, setCvData] = useState(null);
-    const [cvId, setCvId] = useState(null);
-    const [allCvs, setAllCvs] = useState([]);
-    const [saving, setSaving] = useState(false);
-    const [saved, setSaved] = useState(false);
+  const { id } = useParams();
+  const navigate = useNavigate();
 
-    // Load cover letter and CVs
-    useEffect(() => {
-        Promise.all([
-            coverLetterAPI.getOne(id).then(r => {
-                const cl = r.data;
-                setTitle(cl.title || 'My Cover Letter');
-                setContent({ ...DEFAULT_CONTENT, ...(cl.content || {}) });
-                setCvId(cl.cv_id);
-            }),
-            cvAPI.getAll().then(r => setAllCvs(r.data)),
-        ]).catch(console.error);
-    }, [id]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [letter, setLetter] = useState(null);
+  const [title, setTitle] = useState('');
+  const [letterText, setLetterText] = useState('');
+  const [toast, setToast] = useState(null);
 
-    // Load linked CV data for prefill
-    useEffect(() => {
-        if (!cvId) { setCvData(null); return; }
-        cvAPI.getOne(cvId).then(r => setCvData(r.data.parsed_data)).catch(() => setCvData(null));
-    }, [cvId]);
+  useEffect(() => {
+    fetchLetter();
+  }, [id]);
 
-    // Auto-save
-    const debouncedContent = useDebounce(content, 1000);
-    useEffect(() => {
-        if (!id) return;
-        setSaving(true);
-        coverLetterAPI.update(id, { title, cv_id: cvId, content: debouncedContent }).then(() => {
-            setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 2000);
-        }).catch(() => setSaving(false));
-    }, [debouncedContent, id]);
+  const showToast = (msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
-    const set = (k, v) => setContent(prev => ({ ...prev, [k]: v }));
+  const fetchLetter = async () => {
+    try {
+      setLoading(true);
+      const res = await coverLetterAPI.get(id);
+      
+      console.log('📖 Fetched letter:', JSON.stringify(res.data, null, 2));
+      
+      // ✅ FIX: Extract text from content object properly
+      setLetter(res.data);
+      setTitle(res.data.title);
+      
+      // Extract the text content
+      let text = '';
+      if (typeof res.data.content === 'string') {
+        // If content is a plain string
+        text = res.data.content;
+      } else if (res.data.content && typeof res.data.content === 'object') {
+        // If content is an object, get the text field
+        text = res.data.content.text || '';
+      }
+      
+      console.log('📝 Extracted text:', text.substring(0, 100) + '...');
+      setLetterText(text);
+      
+    } catch (err) {
+      console.error('❌ Error fetching letter:', err);
+      showToast('Failed to load cover letter', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    // Prefill from CV
-    const prefill = () => {
-        if (!cvData) return;
-        const pi = cvData.personalInfo || {};
-        setContent(prev => ({
-            ...prev,
-            signature: pi.name || prev.signature,
-            opening: prev.opening || `Dear ${prev.recipient_name || 'Hiring Manager'},\n\nI am writing to express my interest in the ${prev.role || 'position'} at ${prev.company || 'your company'}.`,
-            closing: prev.closing || `I look forward to discussing how my ${cvData.skills?.slice(0, 3).join(', ')} skills can contribute to ${prev.company || 'your team'}.\n\nThank you for your consideration.`,
-        }));
-    };
+  const saveLetter = async () => {
+    if (!title.trim()) {
+      showToast('Please enter a title', 'error');
+      return;
+    }
+    if (!letterText.trim()) {
+      showToast('Cover letter cannot be empty', 'error');
+      return;
+    }
 
-    const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
-    const pi = cvData?.personalInfo || {};
+    try {
+      setSaving(true);
+      console.log('💾 Saving letter...');
+      console.log('   Title:', title);
+      console.log('   Text length:', letterText.length);
+      
+      // ✅ FIX: Send the FULL content object back, not empty!
+      // The backend needs the complete structure
+      const updateData = {
+        title: title,
+        content: {
+          text: letterText,
+          generated_with_ai: letter?.content?.generated_with_ai || false,
+          job_description: letter?.content?.job_description || '',
+          created_at: letter?.content?.created_at || new Date().toISOString()
+        }
+      };
+      
+      console.log('📤 Sending update:', JSON.stringify(updateData, null, 2));
+      
+      const res = await coverLetterAPI.update(id, updateData);
+      
+      console.log('✅ Update response:', JSON.stringify(res.data, null, 2));
+      showToast('Cover letter saved successfully!');
+      
+      // Refresh the letter to confirm save
+      setTimeout(() => {
+        fetchLetter();
+      }, 500);
+      
+    } catch (err) {
+      console.error('❌ Error saving:', err.response?.data || err);
+      showToast(err.response?.data?.detail || 'Failed to save cover letter', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
 
+  if (loading) {
     return (
-        <div className="min-h-screen bg-gray-50 flex flex-col">
-            {/* Top bar */}
-            <div className="bg-white border-b border-gray-200 sticky top-0 z-20 px-4 py-2.5 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                    <button onClick={() => navigate('/cover-letters')} className="text-gray-500 hover:text-gray-800">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-                    </button>
-                    <input value={title} onChange={e => setTitle(e.target.value)} className="text-base font-bold border-0 focus:outline-none bg-transparent" />
-                    <span className="text-xs text-gray-400">{saving ? '⏳ Saving…' : saved ? '✓ Saved' : ''}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                    {cvId && <button onClick={prefill} className="px-3 py-1.5 bg-amber-100 text-amber-700 text-xs font-semibold rounded-lg hover:bg-amber-200 transition">✨ Prefill from CV</button>}
-                </div>
-            </div>
-
-            <div className="flex flex-1 overflow-hidden">
-                {/* Left: Form */}
-                <div className="w-[400px] flex-shrink-0 overflow-y-auto bg-white border-r border-gray-200 p-4 space-y-4">
-                    {/* Link CV */}
-                    <div>
-                        <label className={LABEL}>Link to CV</label>
-                        <select value={cvId || ''} onChange={e => setCvId(e.target.value ? +e.target.value : null)} className={INPUT}>
-                            <option value="">None</option>
-                            {allCvs.map(cv => <option key={cv.id} value={cv.id}>{cv.title || `CV #${cv.id}`}</option>)}
-                        </select>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                        <div><label className={LABEL}>Recipient Name</label><input className={INPUT} value={content.recipient_name} onChange={e => set('recipient_name', e.target.value)} placeholder="Hiring Manager" /></div>
-                        <div><label className={LABEL}>Date</label><input type="date" className={INPUT} value={content.date || new Date().toISOString().slice(0, 10)} onChange={e => set('date', e.target.value)} /></div>
-                        <div><label className={LABEL}>Company</label><input className={INPUT} value={content.company} onChange={e => set('company', e.target.value)} placeholder="Google" /></div>
-                        <div><label className={LABEL}>Position / Role</label><input className={INPUT} value={content.role} onChange={e => set('role', e.target.value)} placeholder="Software Engineer" /></div>
-                    </div>
-
-                    <div><label className={LABEL}>Opening Paragraph</label><textarea className={TEXTAREA} rows={4} value={content.opening} onChange={e => set('opening', e.target.value)} placeholder="Dear Hiring Manager, I am writing to…" /></div>
-                    <div><label className={LABEL}>Body</label><textarea className={TEXTAREA} rows={7} value={content.body} onChange={e => set('body', e.target.value)} placeholder="In my current role at…" /></div>
-                    <div><label className={LABEL}>Closing Paragraph</label><textarea className={TEXTAREA} rows={3} value={content.closing} onChange={e => set('closing', e.target.value)} placeholder="I look forward to hearing from you…" /></div>
-                    <div><label className={LABEL}>Your Name (Signature)</label><input className={INPUT} value={content.signature} onChange={e => set('signature', e.target.value)} placeholder={pi.name || 'Your Name'} /></div>
-                </div>
-
-                {/* Right: Letter preview */}
-                <div className="flex-1 overflow-y-auto bg-gray-100 flex items-start justify-center py-10 px-6">
-                    <div className="bg-white shadow-xl rounded-sm w-[620px] min-h-[877px] p-14 font-serif text-[13px] leading-relaxed text-gray-800">
-                        {/* Sender info */}
-                        {pi.name && (
-                            <div className="mb-6 text-xs text-gray-500">
-                                <div className="font-semibold text-gray-800">{pi.name}</div>
-                                {pi.email && <div>{pi.email}</div>}
-                                {pi.phone && <div>{pi.phone}</div>}
-                                {pi.location && <div>{pi.location}</div>}
-                            </div>
-                        )}
-                        <div className="text-xs text-gray-500 mb-6">{content.date ? new Date(content.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' }) : today}</div>
-                        {(content.company || content.recipient_name) && (
-                            <div className="mb-6 text-sm">
-                                {content.recipient_name && <div>{content.recipient_name}</div>}
-                                {content.company && <div className="font-semibold">{content.company}</div>}
-                            </div>
-                        )}
-                        {content.role && <div className="font-semibold text-sm mb-4">Re: Application for {content.role}</div>}
-                        {content.opening && <p className="mb-4 whitespace-pre-line">{content.opening}</p>}
-                        {content.body && <p className="mb-4 whitespace-pre-line">{content.body}</p>}
-                        {content.closing && <p className="mb-6 whitespace-pre-line">{content.closing}</p>}
-                        <div className="mt-8">
-                            <div className="text-sm">{content.signature || pi.name || 'Your Name'}</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+      <div className="min-h-screen flex items-center justify-center">
+        <svg className="animate-spin w-8 h-8 text-primary" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
+      </div>
     );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 py-8">
+      {toast && (
+        <div className={`fixed top-16 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}>
+          {toast.msg}
+        </div>
+      )}
+
+      <div className="max-w-4xl mx-auto px-6">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Edit Cover Letter</h1>
+            <p className="text-gray-500 mt-1">Modify and save your cover letter</p>
+          </div>
+          <button
+            onClick={() => navigate('/cover-letters')}
+            className="text-gray-600 hover:text-gray-900 transition"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Editor */}
+        <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-200">
+          {/* Title Input */}
+          <div className="mb-6">
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Title</label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g., Application for Senior Developer at TechCorp"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+            />
+          </div>
+
+          {/* Letter Content Editor */}
+          <div className="mb-6">
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Cover Letter</label>
+            <textarea
+              value={letterText}
+              onChange={(e) => setLetterText(e.target.value)}
+              placeholder="Your cover letter text..."
+              rows={15}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary resize-none font-mono"
+            />
+            <p className="text-xs text-gray-500 mt-1">{letterText.length} characters</p>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex gap-3">
+            <button
+              onClick={saveLetter}
+              disabled={saving || !title.trim() || !letterText.trim()}
+              className="flex-1 py-2 px-4 bg-primary text-white rounded-lg font-semibold hover:bg-primary-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition"
+            >
+              {saving ? '💾 Saving...' : '✓ Save Changes'}
+            </button>
+            <button
+              onClick={() => navigate('/cover-letters')}
+              className="flex-1 py-2 px-4 border border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50 transition"
+            >
+              ← Back to List
+            </button>
+          </div>
+        </div>
+
+        {/* Info */}
+        {letter && (
+          <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+            <p className="font-semibold mb-1">💡 Info</p>
+            <p>This cover letter was generated on {new Date(letter.created_at).toLocaleDateString()}</p>
+            {letter.content?.generated_with_ai && (
+              <p className="text-blue-700 mt-1">🤖 Generated with AI</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };
 
 export default CoverLetterEditorPage;
