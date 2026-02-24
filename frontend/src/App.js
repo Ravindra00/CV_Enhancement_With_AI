@@ -6,13 +6,14 @@ import { useAuthStore } from './store/authStore';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import DashboardPage from './pages/DashboardPage';
+import CVViewPage from './pages/CVViewPage';  // ← NEW: Import view page
 import CVEditorPage from './pages/CVEditorPage';
 import CVCustomizePage from './pages/CVCustomizePage';
 import CoverLetterPage from './pages/CoverLetterPage';
+import CoverLetterViewPage from './pages/CoverLetterViewPage';  // ← Already imported
 import CoverLetterEditorPage from './pages/CoverLetterEditorPage';
 import CoverLetterGeneratorPage from './pages/CoverLetterGeneratorPage';
 import JobTrackerPage from './pages/JobTrackerPage';
-import CoverLetterViewPage from './pages/CoverLetterViewPage';
 import NotFoundPage from './pages/NotFoundPage';
 
 // Components
@@ -27,31 +28,49 @@ function App() {
       <div className="min-h-screen bg-gray-50">
         {isAuthenticated && <Navbar />}
         <Routes>
-          {/* Public */}
+          {/* ==================== PUBLIC ROUTES ==================== */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
 
-          {/* Protected */}
+          {/* ==================== PROTECTED ROUTES ==================== */}
+
+          {/* Dashboard */}
           <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
 
-          {/* CV editor — support both /cv/:id and /cv-editor/:cvId for backward compat */}
-          <Route path="/cv/:id" element={<ProtectedRoute><CVEditorPage /></ProtectedRoute>} />
+          {/* ===== CV ROUTES (SEPARATED: View vs Edit) ===== */}
+          {/* View Page - Display CV content (READ-ONLY) */}
+          <Route path="/cv/:cvId" element={<ProtectedRoute><CVViewPage /></ProtectedRoute>} />
+
+          {/* Edit Page - Modify CV content */}
+          <Route path="/cv/:cvId/edit" element={<ProtectedRoute><CVEditorPage /></ProtectedRoute>} />
+
+          {/* Backward compatibility */}
           <Route path="/cv-editor/:cvId" element={<ProtectedRoute><CVEditorPage /></ProtectedRoute>} />
 
-          {/* AI Customize — support both URL shapes */}
-          <Route path="/cv/:id/customize" element={<ProtectedRoute><CVCustomizePage /></ProtectedRoute>} />
+          {/* AI Customize */}
+          <Route path="/cv/:cvId/customize" element={<ProtectedRoute><CVCustomizePage /></ProtectedRoute>} />
           <Route path="/cv-customize/:cvId" element={<ProtectedRoute><CVCustomizePage /></ProtectedRoute>} />
 
-          {/* Cover Letters */}
+          {/* ===== COVER LETTER ROUTES (SEPARATED: View vs Edit) ===== */}
+          {/* List Page */}
           <Route path="/cover-letters" element={<ProtectedRoute><CoverLetterPage /></ProtectedRoute>} />
-          <Route path="/cover-letters/:id" element={<ProtectedRoute><CoverLetterEditorPage /></ProtectedRoute>} />
+
+          {/* View Page - Display letter content (READ-ONLY) */}
+          <Route path="/cover-letters/:id/view" element={<ProtectedRoute><CoverLetterViewPage /></ProtectedRoute>} />
+
+          {/* Edit Page - Modify letter content */}
+          <Route path="/cover-letters/:id/edit" element={<ProtectedRoute><CoverLetterEditorPage /></ProtectedRoute>} />
+
+          {/* Backward compatibility - keep old route pointing to view page */}
           <Route path="/cover-letter/:id" element={<ProtectedRoute><CoverLetterViewPage /></ProtectedRoute>} />
+
+          {/* Generator Page */}
           <Route path="/cover-letter/new" element={<ProtectedRoute><CoverLetterGeneratorPage /></ProtectedRoute>} />
 
           {/* Job Tracker */}
           <Route path="/jobs" element={<ProtectedRoute><JobTrackerPage /></ProtectedRoute>} />
 
-          {/* Default */}
+          {/* ==================== DEFAULT ROUTES ==================== */}
           <Route path="/" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

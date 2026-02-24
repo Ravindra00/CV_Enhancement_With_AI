@@ -68,7 +68,7 @@ export const cvAPI = {
   },
 
   analyze: (cvId) => apiClient.post(`/cvs/${cvId}/analyze`),
-  
+
   enhanceForJob: (cvId, jobDescription) => apiClient.post(`/cvs/${cvId}/enhance-for-job`, { job_description: jobDescription }),
 };
 
@@ -82,22 +82,23 @@ export const customizeAPI = {
 
 // ── AI Cover Letter Generation ─────────────────────────────────────────────────
 export const aiCoverLetterAPI = {
-  generateWithAI: (cvId, jobDescription, title) => 
+  generateWithAI: (cvId, jobDescription, title) =>
     apiClient.post('/cover-letters/generate-with-ai', { cv_id: cvId, job_description: jobDescription, title }),
-  extractFromURL: (url) => 
+  extractFromURL: (url) =>
     apiClient.post('/cover-letters/extract-job-from-url', { url }),
 };
 
 // ── Cover Letters ─────────────────────────────────────────────────────────────
 export const coverLetterAPI = {
   getAll: () => apiClient.get('/cover-letters'),
+  get: (id) => apiClient.get(`/cover-letters/${id}`),
   getOne: (id) => apiClient.get(`/cover-letters/${id}`),
   create: (data) => apiClient.post('/cover-letters', data),
   update: (id, data) => apiClient.put(`/cover-letters/${id}`, data),
   delete: (id) => apiClient.delete(`/cover-letters/${id}`),
-  generateWithAI: (cvId, jobDescription, title = "AI Generated Cover Letter") => 
+  generateWithAI: (cvId, jobDescription, title = "AI Generated Cover Letter") =>
     apiClient.post('/cover-letters/generate-with-ai', { cv_id: cvId, job_description: jobDescription, title }),
-  extractFromURL: (url) => 
+  extractFromURL: (url) =>
     apiClient.post('/cover-letters/extract-job-from-url', { url }),
 };
 
