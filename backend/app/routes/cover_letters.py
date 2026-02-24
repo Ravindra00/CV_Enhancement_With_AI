@@ -29,7 +29,6 @@ def get_cover_letters(
     """List all cover letters for the current user."""
     return db.query(CoverLetter).filter(CoverLetter.user_id == current_user.id).order_by(CoverLetter.updated_at.desc()).all()
 
-
 @router.get("/{cl_id}", response_model=CoverLetterResponse)
 def get_cover_letter(
     cl_id: int,
