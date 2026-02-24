@@ -1,6 +1,8 @@
 """
-AI Enhancement Utility — CV Enhancer
-Uses Groq (free tier, Llama-3.1-8B-Instant) for intelligent CV suggestions.
+AI Enhancement Utility — CV Enhancer (FIXED VERSION)
+Uses Groq (free tier, Llama-3.1-8B-Instant) to:
+1. Generate AI improvement suggestions (text-based)
+2. Generate ACTUAL ENHANCED content that can be merged into CV
 Falls back to rule-based keyword analysis if no API key is set.
 """
 
@@ -133,11 +135,97 @@ def rule_based_suggestions(cv_data: Dict[str, Any], job_desc: str, missing: List
     return suggestions
 
 
-# ── Groq AI suggestions ────────────────────────────────────────────────────────
+# ✅ NEW FUNCTION: Generate actual enhanced content (not just suggestions)
+def generate_enhanced_experience_for_suggestion(
+    experience: Dict[str, Any],
+    missing_keywords: List[str],
+    job_description: str
+) -> Optional[Dict[str, Any]]:
+    """
+    Use Groq to generate ENHANCED version of an experience entry
+    that incorporates missing keywords and job requirements.
+    
+    This creates the actual suggestion_data that will be merged into CV!
+    
+    Args:
+        experience: Current experience entry
+        missing_keywords: Keywords missing from CV
+        job_description: Target job description
+    
+    Returns:
+        Enhanced experience object or None if Groq unavailable
+    """
+    api_key = os.getenv("GROQ_API_KEY", "").strip()
+    if not api_key:
+        logger.info("GROQ_API_KEY not set — cannot generate enhanced content")
+        return None
+    
+    try:
+        from groq import Groq
+        client = Groq(api_key=api_key)
+        
+        # Build current experience summary
+        current_desc = experience.get('description', '')
+        current_role = experience.get('role') or experience.get('position', 'Unknown')
+        current_company = experience.get('company', 'Unknown')
+        
+        # Prompt to generate enhanced content
+        prompt = f"""You are an expert CV writer. Rewrite this experience entry to better match the job requirements.
+
+CURRENT EXPERIENCE:
+Role: {current_role}
+Company: {current_company}
+Current Description: {current_desc}
+
+TARGET JOB REQUIREMENTS:
+{job_description[:1000]}
+
+KEY SKILLS TO HIGHLIGHT (if applicable):
+{', '.join(missing_keywords[:10])}
+
+TASK: Rewrite the experience description to:
+1. Naturally incorporate relevant missing keywords
+2. Add quantified achievements and metrics where possible
+3. Focus on results and impact
+4. Use action verbs (Built, Led, Designed, Implemented, etc.)
+5. Be specific and concrete
+
+Return ONLY the improved description text (3-5 bullet points). Start each line with a bullet (•):
+"""
+
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=800,
+            timeout=20,
+        )
+        
+        if response.choices and len(response.choices) > 0:
+            enhanced_desc = response.choices[0].message.content.strip()
+            
+            # Create enhanced experience object (copy of original with improved description)
+            enhanced_exp = {**experience}
+            enhanced_exp['description'] = enhanced_desc
+            
+            logger.info(f"✅ Generated enhanced experience for {current_role}")
+            return enhanced_exp
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"❌ Error generating enhanced experience: {e}")
+        return None
+
+
+# ── Groq AI suggestions (FIXED: Now includes suggestion_data)
 def groq_suggestions(cv_data: Dict[str, Any], job_desc: str, missing: List[str], score: int) -> Optional[List[Dict]]:
     """
     Uses Groq's free API with Llama-3.1-8B-Instant to generate contextual,
     specific CV improvement suggestions tailored to the job description.
+    
+    ✅ FIXED: Now includes 'suggestion_data' field with actual enhanced content!
+    
     Returns None if Groq is unavailable or not configured.
     """
     api_key = os.getenv("GROQ_API_KEY", "").strip()
@@ -203,14 +291,35 @@ Return ONLY a JSON array with this exact structure (no extra text):
             return None
 
         suggestions = json.loads(match.group())
-        # Validate structure
-        valid = []
+        
+        # ✅ FIXED: Add actual suggestion_data for experience suggestions
         VALID_SECTIONS = {'summary','experience','skills','education','certifications','languages','projects','general','personalInfo'}
+        valid = []
+        
         for s in suggestions:
             if isinstance(s, dict) and all(k in s for k in ['title','description','suggestion']):
                 s['section'] = s.get('section', 'general') if s.get('section') in VALID_SECTIONS else 'general'
+                
+                # ✅ NEW: If this is an experience suggestion, generate the actual enhanced experience
+                if s['section'] == 'experience' and exps:
+                    logger.info(f"📝 Generating enhanced experience for suggestion: {s['title']}")
+                    
+                    # Generate enhanced version of the first experience entry
+                    enhanced_exp = generate_enhanced_experience_for_suggestion(
+                        exps[0],  # Use first (most recent) experience
+                        missing,
+                        s['suggestion']  # Pass the suggestion text as context
+                    )
+                    
+                    if enhanced_exp:
+                        s['suggestion_data'] = enhanced_exp
+                        logger.info(f"✅ Added suggestion_data: {enhanced_exp.get('role', 'Unknown')}")
+                    else:
+                        logger.warning(f"⚠️ Could not generate suggestion_data for {s['title']}")
+                
                 valid.append(s)
-        logger.info(f"Groq returned {len(valid)} suggestions")
+        
+        logger.info(f"Groq returned {len(valid)} suggestions ({sum(1 for s in valid if 'suggestion_data' in s)} with data)")
         return valid if valid else None
 
     except Exception as e:
@@ -223,6 +332,8 @@ def generate_suggestions(cv_data: Dict[str, Any], job_description: str) -> Dict[
     """
     Main function called by the /customize endpoint.
     Returns: { score, matched_keywords, missing_keywords, suggestions, ai_powered }
+    
+    ✅ FIXED: Suggestions now include 'suggestion_data' with actual enhanced content!
     """
     # 1. Extract keywords from both sides
     cv_text = json.dumps(cv_data)

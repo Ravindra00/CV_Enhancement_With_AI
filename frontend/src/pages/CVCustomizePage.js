@@ -8,6 +8,11 @@ const CVCustomizePage = () => {
   const cvId = params.id || params.cvId;  // support /cv/:id/customize and /cv-customize/:cvId
   const navigate = useNavigate();
   const [cv, setCV] = useState(null);
+
+  // ✅ ADD THESE LINES
+  const [originalCVData, setOriginalCVData] = useState({});
+  const [enhancementHistory, setEnhancementHistory] = useState([]);
+
   const [cvData, setCVData] = useState({});
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
@@ -37,7 +42,11 @@ const CVCustomizePage = () => {
     try {
       const r = await cvAPI.getOne(cvId);
       setCV(r.data);
-      setCVData(r.data.parsed_data || {});
+      //setCVData(r.data.parsed_data || {});
+      // ✅ REPLACE WITH THIS
+      const parsedData = r.data.parsed_data || {};
+      setOriginalCVData(JSON.parse(JSON.stringify(parsedData))); // Backup
+      setCVData(JSON.parse(JSON.stringify(parsedData)));
       // setCVData(mapBackendToPreview(r.data))
     } catch { showToast('Failed to load CV', 'error'); }
     finally { setLoading(false); }
@@ -55,20 +64,69 @@ const CVCustomizePage = () => {
       setMatchScore(d.score ?? null);
       setMatchedKeywords(d.matched_keywords || []);
       setMissingKeywords(d.missing_keywords || []);
-    } catch { showToast('Analysis failed. Try again.', 'error'); }
+    } catch (error) {
+          showToast('Analysis failed. Try again.', 'error');
+          const errorMessage = error.response?.data?.detail 
+        || error.response?.data?.message 
+        || error.message 
+        || 'Analysis failed';
+      
+      // ✅ LOG THE ERROR SO WE CAN SEE WHAT WENT WRONG
+      console.log('Error Details:', {
+        status: error.response?.status,
+        message: errorMessage,
+        endpoint: `/api/cvs/${cvId}/analyze`
+      });
+      
+      showToast(`❌ ${errorMessage}`, 'error');
+      setSuggestions([]);
+  }
     finally { setAnalyzing(false); }
   };
 
   const handleApply = async (suggestion, index) => {
-    try {
-      await customizeAPI.applySuggestion(cvId, suggestion.id);
-      setAppliedIds(prev => new Set([...prev, index]));
-      showToast('Suggestion applied!');
-      // Refresh cv data to update preview
+  try {
+    console.log('📝 Applying suggestion:', suggestion);
+    
+    // Call backend
+    const res = await customizeAPI.applySuggestion(cvId, suggestion.id);
+    console.log('📥 Apply response:', res.data);
+    
+    // Mark as applied
+    setAppliedIds(prev => new Set([...prev, index]));
+    
+    // ✅ KEY: Update CVData with the returned updated CV
+    if (res.data?.updated_cv) {
+      console.log('✅ Updating CVData with merged suggestion');
+      setCVData(res.data.updated_cv);  // ← This updates the preview!
+    } else {
+      console.warn('⚠️ No updated_cv in response, refetching...');
       const r = await cvAPI.getOne(cvId);
-      setCVData(r.data.parsed_data || {});
-    } catch { showToast('Failed to apply suggestion', 'error'); }
-  };
+      setCVData(r.data.experiences || {});
+    }
+    
+    showToast('✅ Suggestion applied!', 'success');
+    
+  } catch (error) {
+    console.error('❌ Apply failed:', error);
+    const msg = error.response?.data?.detail || error.message;
+    showToast(`❌ Error: ${msg}`, 'error');
+  }
+};
+
+  // ✅ ADD THIS FUNCTION
+const handleRevertToOriginal = async () => {
+  if (!window.confirm('Revert all changes to original CV?')) {
+    return;
+  }
+  
+  const originalCopy = JSON.parse(JSON.stringify(originalCVData));
+  setCVData(originalCopy);
+  setAppliedIds(new Set());
+  setEnhancementHistory([]);
+  
+  showToast('↶ Reverted to original CV', 'info');
+};
 
   const handleDownloadPDF = async () => {
     try {

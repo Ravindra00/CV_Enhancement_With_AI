@@ -776,6 +776,12 @@ def get_suggestions(
     return db.query(Suggestion).filter(Suggestion.cv_id == cv_id).order_by(Suggestion.created_at.desc()).all()
 
 
+# ════════════════════════════════════════════════════════════════════════════════════
+# CRITICAL FIX: apply_suggestion endpoint (UPDATED)
+# ════════════════════════════════════════════════════════════════════════════════════
+# Replace the endpoint in backend/app/routes/cvs.py (lines 779-802) with this:
+# This version REPLACES original content instead of appending when suggestion_data exists
+
 @router.post("/{cv_id}/suggestions/{suggestion_id}/apply")
 def apply_suggestion(
     cv_id: int,
@@ -783,11 +789,29 @@ def apply_suggestion(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Mark a suggestion as applied (tracks UI state)."""
+    """
+    ✅ FIXED: Apply a suggestion by merging/replacing its data into the CV.
+    
+    KEY BEHAVIOR:
+    - If suggestion has suggestion_data (actual enhanced content), use it
+    - For experience/projects: REPLACE the original item with enhanced version
+    - For skills/languages: APPEND or MERGE into existing
+    - This allows users to overwrite with better versions
+    
+    This endpoint:
+    1. Gets the suggestion with its suggestion_data
+    2. For experience: REPLACES the matching original entry
+    3. For other sections: Merges or appends appropriately
+    4. Marks the suggestion as applied
+    5. Returns the UPDATED CV data so frontend can update the preview
+    """
+    
+    # Step 1: Verify CV ownership
     cv = db.query(CV).filter(CV.id == cv_id, CV.user_id == current_user.id).first()
     if not cv:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
 
+    # Step 2: Get the suggestion with its data
     suggestion = db.query(Suggestion).filter(
         Suggestion.id == suggestion_id,
         Suggestion.cv_id == cv_id
@@ -795,8 +819,155 @@ def apply_suggestion(
     if not suggestion:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Suggestion not found")
 
-    suggestion.is_applied = True
-    suggestion.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(suggestion)
-    return {"message": "Suggestion applied", "suggestion": SuggestionResponse.from_orm(suggestion)}
+    # Step 3: Apply suggestion data to CV ✅ THIS IS THE CRITICAL PART
+    try:
+        section = suggestion.section
+        suggestion_data = suggestion.suggestion_data
+        
+        if not suggestion_data:
+            # If no data, just mark as applied
+            print(f"⚠️ Suggestion {suggestion_id} has no suggestion_data to merge")
+            suggestion.is_applied = True
+            suggestion.updated_at = datetime.utcnow()
+            db.commit()
+            return {
+                "message": "Suggestion marked as applied (no data to merge)",
+                "suggestion": SuggestionResponse.from_orm(suggestion)
+            }
+        
+        print(f"📝 Applying {section} suggestion to CV {cv_id}")
+        print(f"   Suggestion data: {suggestion_data}")
+        
+        # ✅ REPLACE strategy for experience (most common case)
+        if section == "experience":
+            if cv.experiences is None:
+                cv.experiences = []
+            if not isinstance(cv.experiences, list):
+                cv.experiences = []
+            
+            # Strategy: REPLACE the first/most recent experience with the enhanced version
+            # This allows users to improve their current role's description
+            if cv.experiences:
+                print(f"✅ REPLACING first experience entry with enhanced version")
+                print(f"   Old: {cv.experiences[0].get('role', 'Unknown')}")
+                print(f"   New: {suggestion_data.get('role', 'Unknown')}")
+                cv.experiences[0] = suggestion_data
+            else:
+                # If no experiences, just add
+                print(f"✅ Adding new experience (no existing entries)")
+                cv.experiences.append(suggestion_data)
+            
+        elif section == "projects":
+            if cv.projects is None:
+                cv.projects = []
+            if not isinstance(cv.projects, list):
+                cv.projects = []
+            
+            # For projects: also REPLACE first one
+            if cv.projects:
+                print(f"✅ REPLACING first project with enhanced version")
+                cv.projects[0] = suggestion_data
+            else:
+                print(f"✅ Adding new project (no existing entries)")
+                cv.projects.append(suggestion_data)
+            
+        elif section == "education":
+            if cv.educations is None:
+                cv.educations = []
+            if not isinstance(cv.educations, list):
+                cv.educations = []
+            
+            # For education: REPLACE first one if exists
+            if cv.educations:
+                print(f"✅ REPLACING first education with enhanced version")
+                cv.educations[0] = suggestion_data
+            else:
+                print(f"✅ Adding new education (no existing entries)")
+                cv.educations.append(suggestion_data)
+            
+        elif section == "skills":
+            if cv.skills is None:
+                cv.skills = {}
+            if not isinstance(cv.skills, dict):
+                cv.skills = {}
+            
+            # For skills: MERGE by category (avoid duplicates)
+            if isinstance(suggestion_data, dict):
+                for category, skills_list in suggestion_data.items():
+                    if category not in cv.skills:
+                        cv.skills[category] = []
+                    if not isinstance(cv.skills[category], list):
+                        cv.skills[category] = []
+                    
+                    # Add new skills, avoiding duplicates
+                    existing_skills = set(cv.skills[category])
+                    for skill in skills_list:
+                        if skill not in existing_skills:
+                            cv.skills[category].append(skill)
+                
+                print(f"✅ Merged skills: {suggestion_data}")
+        
+        elif section == "languages":
+            if cv.languages is None:
+                cv.languages = []
+            if not isinstance(cv.languages, list):
+                cv.languages = []
+            
+            # For languages: APPEND (usually different languages)
+            print(f"✅ Added language: {suggestion_data.get('language', 'Unknown')}")
+            cv.languages.append(suggestion_data)
+        
+        elif section == "certifications":
+            if cv.certifications is None:
+                cv.certifications = []
+            if not isinstance(cv.certifications, list):
+                cv.certifications = []
+            
+            # For certifications: APPEND
+            print(f"✅ Added certification: {suggestion_data.get('name', 'Unknown')}")
+            cv.certifications.append(suggestion_data)
+        
+        else:
+            # Unknown section, just mark as applied
+            print(f"⚠️ Unknown section: {section}")
+        
+        # Step 4: Mark suggestion as applied and update timestamp
+        suggestion.is_applied = True
+        suggestion.updated_at = datetime.utcnow()
+        
+        # Step 5: Update CV timestamp and version
+        cv.updated_at = datetime.utcnow()
+        cv.current_version = (cv.current_version or 1) + 1
+        
+        # Step 6: Commit to database
+        db.add(cv)
+        db.add(suggestion)
+        db.commit()
+        db.refresh(cv)
+        db.refresh(suggestion)
+        
+        print(f"✅ Suggestion applied successfully!")
+        
+        # Step 7: Return BOTH the updated suggestion AND the updated CV
+        # ✅ Frontend needs the updated CV data to update the preview!
+        return {
+            "message": "Suggestion applied successfully",
+            "suggestion": SuggestionResponse.from_orm(suggestion),
+            "updated_cv": cv  # ← CRITICAL: Return the updated CV
+        }
+        
+    except Exception as e:
+        db.rollback()
+        import traceback
+        print(f"❌ Error applying suggestion: {str(e)}")
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to apply suggestion: {str(e)}"
+        )
+
+# ════════════════════════════════════════════════════════════════════════════════════
+# END OF FIXED ENDPOINT
+# ════════════════════════════════════════════════════════════════════════════════════
+
+

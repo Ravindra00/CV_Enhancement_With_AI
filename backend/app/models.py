@@ -156,7 +156,7 @@ class CVCustomization(Base):
 
 
 # ───────────────────────────────────────────────────────────────
-# SUGGESTIONS
+# SUGGESTIONS - ✅ FIXED VERSION
 # ───────────────────────────────────────────────────────────────
 
 class Suggestion(Base):
@@ -167,10 +167,17 @@ class Suggestion(Base):
     cv_id = Column(Integer, ForeignKey("cvs.id"))
     customization_id = Column(Integer, ForeignKey("cv_customizations.id"), nullable=True)
 
-    section = Column(String(50))  # e.g. education, experience
+    section = Column(String(50))  # e.g. education, experience, skills, projects
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=False)
     suggestion_text = Column(Text, nullable=False)
+    
+    # ✅ KEY FIX: Store the actual data structure to merge into CV
+    # For experience: {job_title, company_name, location, responsibilities, ...}
+    # For projects: {name, description, technologies, ...}
+    # For skills: {programming: [...], cloud: [...], ...}
+    # For education: {degree, institution_name, field_of_study, ...}
+    suggestion_data = Column(JSONB, nullable=True)
 
     is_applied = Column(Boolean, default=False)
 

@@ -266,7 +266,7 @@ class CVCustomizationResponse(BaseModel):
 
 
 # ───────────────────────────────────────────────────────────────
-# SUGGESTIONS
+# SUGGESTIONS - ✅ FIXED VERSION
 # ───────────────────────────────────────────────────────────────
 
 class SuggestionResponse(BaseModel):
@@ -277,6 +277,10 @@ class SuggestionResponse(BaseModel):
     title: str
     description: str
     suggestion_text: str
+    
+    # ✅ KEY FIX: Include the actual data to add
+    suggestion_data: Optional[Dict[str, Any]] = None
+    
     is_applied: bool = False
     created_at: datetime
 
