@@ -141,7 +141,7 @@ def populate_cv():
             profile_summary=resume_data["profile_summary"],
             educations=resume_data["educations"],
             experiences=resume_data["experiences"],
-            skills=resume_data["skills"],
+            skills=resume_dafta["skills"],
             languages=resume_data["languages"],
             certifications=resume_data["certifications"],
             current_version=1,
