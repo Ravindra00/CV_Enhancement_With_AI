@@ -251,7 +251,29 @@ Summary exists: {'Yes' if cv_data.get('summary') else 'No'}
 Keyword match score: {score}/100
 Missing keywords: {', '.join(missing[:10])}"""
 
-        prompt = f"""You are an expert CV coach helping a candidate tailor their CV for a specific job.
+        # Detect CV language - use only unambiguously German words (not common prepositions)
+        sample_text = " ".join([
+            json.dumps(exps[:3], ensure_ascii=False)[:500],
+            json.dumps(skills[:20], ensure_ascii=False)[:200],
+            str(cv_data.get('summary') or '')[:300],
+        ]).lower()
+        german_indicators = [
+            'erfahrung', 'kenntnisse', 'fähigkeiten', 'entwicklung',
+            'verantwortlich', 'unternehmen', 'aufgaben', 'tätigkeiten',
+            'leitung', 'planung', 'umsetzung', 'berufserfahrung',
+            'studium', 'abschluss', 'ausbildung', 'weiterbildung',
+            'deutsch', 'englisch', 'muttersprache', 'bewerber',
+            'softwareentwickler', 'projektmanager', 'datenbankadministrator',
+            'werkzeuge', 'projekte', 'sprachen', 'bildung',
+        ]
+        german_score = sum(1 for w in german_indicators if w in sample_text)
+        lang_note = (
+            "IMPORTANT: The CV is in German. Write ALL suggestions, descriptions, "
+            "and examples in German. Do NOT switch to English under any circumstances.\n\n"
+            if german_score >= 2 else ""
+        )
+
+        prompt = f"""{lang_note}You are an expert CV coach helping a candidate tailor their CV for a specific job.
 
 CANDIDATE CV SUMMARY:
 {cv_summary}

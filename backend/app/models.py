@@ -79,6 +79,8 @@ class CV(Base):
     languages = Column(JSONB)
     certifications = Column(JSONB)
     interests = Column(JSONB)
+    custom_sections = Column(JSONB)   # [{title, content}]
+    theme = Column(JSONB)             # {primaryColor, fontFamily, layout, accentStyle}
 
     # AI-ready metadata
     embedding = Column(JSONB, nullable=True)  # can replace with pgvector later

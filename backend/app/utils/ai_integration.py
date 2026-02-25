@@ -404,6 +404,176 @@ Respond with ONLY valid JSON, no other text:
 # CV ENHANCEMENT
 # ============================================================================
 
+def groq_enhance_sections(cv_data: Dict, job_description: str) -> Dict:
+    """
+    Use Groq AI to regenerate the three ATS-critical CV sections:
+      - experiences  (rewrite descriptions / responsibilities)
+      - projects     (rewrite descriptions, add relevant tech)
+      - skills       (keep format, add / highlight missing keywords)
+
+    Uses the same client & model-resolution pattern as generate_cover_letter.
+    Personal info, certifications, languages, interests are NOT touched.
+
+    Returns:
+        {
+          "status": "success" | "error",
+          "enhanced_cv": { ...full cv_data with rewritten sections... }
+        }
+    """
+    try:
+        print(f"\n✨ [groq_enhance_sections] Starting...")
+
+        if not client:
+            print("⚠️  Groq client not initialized")
+            return {"enhanced_cv": cv_data, "status": "api_error"}
+
+        model = _get_working_model()
+        if not model:
+            return {"enhanced_cv": cv_data, "status": "api_error"}
+
+        experiences = cv_data.get("experiences", []) or []
+        projects    = cv_data.get("projects",    []) or []
+        skills      = cv_data.get("skills",      []) or []
+
+        # ── Build a compact snapshot of current sections for the prompt ──────
+        import json as _json
+
+        exp_json  = _json.dumps(experiences[:5],  ensure_ascii=False)
+        proj_json = _json.dumps(projects[:5],     ensure_ascii=False)
+        skills_json = _json.dumps(skills,         ensure_ascii=False)
+
+        # ── Detect language of the CV ─────────────────────────────────────────
+        # Sample text from the CV for language detection
+        pi = cv_data.get('personalInfo') or cv_data.get('personal_info') or {}
+        sample_text = " ".join([
+            exp_json[:400],
+            proj_json[:200],
+            skills_json[:200],
+            str(pi.get('summary') or cv_data.get('summary') or '')[:300],
+        ]).lower()
+
+        # Use ONLY unambiguously German words (not prepositions like 'und', 'mit', 'für' that appear in English too)
+        german_indicators = [
+            "erfahrung", "kenntnisse", "fähigkeiten", "verantwortlich",
+            "tätigkeiten", "unternehmen", "entwicklung", "berufserfahrung",
+            "wurde", "haben", "leitung", "planung", "umsetzung",
+            "mitarbeiter", "aufgaben", "ausbildung", "studium", "abschluss",
+            "deutsch", "englisch", "muttersprache", "bewerber",
+            "softwareentwickler", "projektmanager", "werkzeuge", "bildung",
+        ]
+        german_score = sum(1 for w in german_indicators if w in sample_text)
+        language = "German" if german_score >= 2 else "English"
+
+        language_instruction = (
+            "The CV is written in German. You MUST write ALL output text in German. "
+            "Do NOT switch to English under any circumstances."
+            if language == "German" else
+            "Write all output text in English."
+        )
+
+        prompt = f"""You are an expert CV writer specialising in ATS optimisation.
+{language_instruction}
+
+TASK: Rewrite *only* the three sections below so the candidate's CV scores higher
+against the Job Description.  Keep the same JSON structure/field names.
+
+RULES:
+1. Experiences: rewrite the "description" (or "responsibilities") field for each
+   entry to include relevant keywords, quantified achievements, and action verbs.
+   Do NOT change company, role, dates or any other field.
+2. Projects: rewrite the "description" field to highlight relevant technologies
+   from the JD.  Do NOT change name, link, dates or other fields.
+3. Skills: if skills is a dict of categories keep the same structure and add
+   relevant missing keywords;  if it is a flat list add relevant items.
+   Keep it reasonable (max +5 per category or +8 total for a flat list).
+4. Return ONLY valid JSON — no markdown fences, no extra text.
+
+JOB DESCRIPTION:
+{job_description[:1500]}
+
+CURRENT EXPERIENCES (JSON):
+{exp_json}
+
+CURRENT PROJECTS (JSON):
+{proj_json}
+
+CURRENT SKILLS (JSON):
+{skills_json}
+
+Return this exact shape:
+{{
+  "experiences": [ ...same entries with improved description... ],
+  "projects":    [ ...same entries with improved description... ],
+  "skills":      <same shape as input — dict or list>
+}}"""
+
+
+        print(f"📤 Sending enhance request to Groq (model: {model})...")
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=2000,
+            temperature=0.6,
+        )
+
+        if not (response.choices and len(response.choices) > 0):
+            print("❌ No choices in Groq response")
+            return {"enhanced_cv": cv_data, "status": "api_error"}
+
+        raw = response.choices[0].message.content or ""
+        # Strip optional markdown fences
+        raw = raw.replace("```json", "").replace("```", "").strip()
+
+        import re as _re
+        # Extract the outermost JSON object
+        obj_match = _re.search(r"\{.*\}", raw, _re.DOTALL)
+        if not obj_match:
+            print(f"⚠️  Could not find JSON object in Groq response")
+            return {"enhanced_cv": cv_data, "status": "parse_error"}
+
+        enhanced_sections = _json.loads(obj_match.group())
+
+        # ── Merge enhanced sections back into the full CV ────────────────────
+        enhanced_cv = dict(cv_data)  # shallow copy keeps personal_info etc.
+
+        if "experiences" in enhanced_sections and isinstance(enhanced_sections["experiences"], list):
+            # Only overwrite entries that were in scope (up to 5)
+            new_exps = list(experiences)
+            for i, enhanced_exp in enumerate(enhanced_sections["experiences"]):
+                if i < len(new_exps) and isinstance(enhanced_exp, dict):
+                    merged = dict(new_exps[i])
+                    # Update only the description/responsibilities fields
+                    if "description" in enhanced_exp:
+                        merged["description"] = enhanced_exp["description"]
+                    if "responsibilities" in enhanced_exp:
+                        merged["responsibilities"] = enhanced_exp["responsibilities"]
+                    new_exps[i] = merged
+            enhanced_cv["experiences"] = new_exps
+
+        if "projects" in enhanced_sections and isinstance(enhanced_sections["projects"], list):
+            new_projs = list(projects)
+            for i, enhanced_proj in enumerate(enhanced_sections["projects"]):
+                if i < len(new_projs) and isinstance(enhanced_proj, dict):
+                    merged = dict(new_projs[i])
+                    if "description" in enhanced_proj:
+                        merged["description"] = enhanced_proj["description"]
+                    new_projs[i] = merged
+            enhanced_cv["projects"] = new_projs
+
+        if "skills" in enhanced_sections:
+            enhanced_cv["skills"] = enhanced_sections["skills"]
+
+        print("✅ Sections enhanced successfully")
+        return {"enhanced_cv": enhanced_cv, "status": "success"}
+
+    except Exception as e:
+        print(f"❌ ERROR in groq_enhance_sections: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {"enhanced_cv": cv_data, "status": "error", "error": str(e)}
+
+
 def enhance_cv_for_job(cv_data: Dict, job_description: str) -> Dict:
     """
     Create enhanced CV tailored to job description.

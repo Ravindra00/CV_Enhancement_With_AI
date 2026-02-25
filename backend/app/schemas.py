@@ -150,7 +150,9 @@ class CVUpdate(BaseModel):
     skills: Optional[Union[Dict[str, Any], List[Any]]] = None
     languages: Optional[List[Dict[str, Any]]] = None
     certifications: Optional[List[Dict[str, Any]]] = None
-    interests: Optional[List[str]] = None
+    interests: Optional[List[Any]] = None
+    custom_sections: Optional[List[Dict[str, Any]]] = None
+    theme: Optional[Dict[str, Any]] = None
 
 
 class CVResponse(BaseModel):
@@ -172,7 +174,9 @@ class CVResponse(BaseModel):
     skills: Optional[Union[Dict[str, Any], List[Any]]] = None
     languages: Optional[List[Dict[str, Any]]] = None
     certifications: Optional[List[Dict[str, Any]]] = None
-    interests: Optional[List[str]] = None
+    interests: Optional[List[Any]] = None
+    custom_sections: Optional[List[Dict[str, Any]]] = None
+    theme: Optional[Dict[str, Any]] = None
 
     file_path: Optional[str] = None
     photo_path: Optional[str] = None

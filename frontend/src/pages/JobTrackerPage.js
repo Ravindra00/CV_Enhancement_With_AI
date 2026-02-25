@@ -27,6 +27,7 @@ const JobTrackerPage = () => {
     const [coverLetters, setCoverLetters] = useState([]);
     const [stats, setStats] = useState({});
     const [saving, setSaving] = useState(false);
+    const [showExport, setShowExport] = useState(false);
 
     const load = async () => {
         setLoading(true);
@@ -71,6 +72,56 @@ const JobTrackerPage = () => {
     const changeStatus = async (id, newStatus) => {
         await jobApplicationAPI.updateStatus(id, newStatus);
         setApps(prev => prev.map(a => a.id === id ? { ...a, status: newStatus } : a));
+    };
+
+    /* ── Exports ── */
+    const exportCSV = () => {
+        const headers = ['Company', 'Role', 'Location', 'Salary', 'Status', 'Applied Date', 'Job URL', 'Notes'];
+        const rows = apps.map(a => [
+            a.company, a.role, a.location || '', a.salary_range || '',
+            a.status, a.applied_date ? new Date(a.applied_date).toLocaleDateString() : '',
+            a.job_url || '', (a.notes || '').replace(/\n/g, ' '),
+        ].map(v => `"${String(v).replace(/"/g, '""')}"`));
+        const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'job_applications.csv'; a.click();
+        URL.revokeObjectURL(url);
+        setShowExport(false);
+    };
+
+    const exportPDF = () => {
+        const statusColors = { saved: '#6b7280', applied: '#2563eb', interviewing: '#d97706', offer: '#16a34a', rejected: '#dc2626' };
+        const rows = apps.map(a => `
+            <tr>
+                <td>${a.company}</td><td>${a.role}</td>
+                <td>${a.location || '—'}</td><td>${a.salary_range || '—'}</td>
+                <td style="color:${statusColors[a.status]}; font-weight:600">${a.status}</td>
+                <td>${a.applied_date ? new Date(a.applied_date).toLocaleDateString() : '—'}</td>
+                <td style="max-width:200px;font-size:10px;color:#6b7280">${(a.notes || '').substring(0, 120)}</td>
+            </tr>`).join('');
+        const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+            <title>Job Applications</title>
+            <style>
+                body { font-family: Arial, sans-serif; padding: 20px; font-size: 12px; }
+                h1 { font-size: 18px; margin-bottom: 4px; }
+                p { color: #6b7280; margin: 0 0 16px; font-size: 11px; }
+                table { width: 100%; border-collapse: collapse; }
+                th { background: #1a1a1a; color: white; padding: 8px 10px; text-align: left; font-size: 11px; }
+                td { padding: 7px 10px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+                tr:nth-child(even) { background: #f9fafb; }
+            </style></head><body>
+            <h1>Job Application Tracker</h1>
+            <p>Exported ${new Date().toLocaleDateString()} — ${apps.length} applications</p>
+            <table><thead><tr>
+                <th>Company</th><th>Role</th><th>Location</th><th>Salary</th><th>Status</th><th>Applied</th><th>Notes</th>
+            </tr></thead><tbody>${rows}</tbody></table>
+            <script>window.onload=()=>{window.print();}<\/script></body></html>`;
+        const w = window.open('', '_blank');
+        w.document.write(html);
+        w.document.close();
+        setShowExport(false);
     };
 
     const f = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
@@ -119,6 +170,26 @@ const JobTrackerPage = () => {
                                     {v === 'kanban' ? '⊡ Kanban' : '≡ Table'}
                                 </button>
                             ))}
+                        </div>
+                        {/* Export dropdown */}
+                        <div className="relative">
+                            <button
+                                onClick={() => setShowExport(e => !e)}
+                                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-50 transition shadow-sm"
+                            >
+                                ⬇ Export
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                            </button>
+                            {showExport && (
+                                <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-50 w-44 overflow-hidden">
+                                    <button onClick={exportCSV} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2">
+                                        📊 Export as CSV
+                                    </button>
+                                    <button onClick={exportPDF} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 border-t border-gray-100">
+                                        🖨 Print as PDF
+                                    </button>
+                                </div>
+                            )}
                         </div>
                         <button onClick={openNew} className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl font-semibold hover:bg-primary-700 transition shadow-sm">
                             + Add Application
