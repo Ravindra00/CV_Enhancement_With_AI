@@ -17,6 +17,41 @@ const DEFAULT_THEME = {
     accentStyle: 'line', // line | badge | dot
 };
 
+/* ─── Language detection ─── */
+const GERMAN_MARKERS = [
+    'erfahrung', 'kenntnisse', 'fähigkeiten', 'verantwortlich',
+    'unternehmen', 'tätigkeiten', 'entwicklung', 'aufgaben',
+    'bereich', 'mittels', 'wurden', 'wurde', 'haben',
+    'leitung', 'planung', 'umsetzung', 'werkzeug', 'arbeit',
+    'softwareentwickler', 'ingenieur', 'datenbankadministrator',
+];
+
+const detectGerman = (data) => {
+    const pi = data.personal_info || {};
+    let sample = '';
+    sample += (pi.title || pi.jobTitle || '') + ' ';
+    sample += (pi.summary || data.profile_summary || '').substring(0, 400) + ' ';
+    const exps = data.experiences || data.experience || [];
+    exps.slice(0, 2).forEach(e => { sample += (e.description || '').substring(0, 200) + ' '; });
+    sample = sample.toLowerCase();
+    const score = GERMAN_MARKERS.filter(w => sample.includes(w)).length;
+    return score >= 2;
+};
+
+const LABELS_EN = {
+    profile: 'Profile', experience: 'Experience', education: 'Education',
+    skills: 'Skills', languages: 'Languages', interests: 'Interests',
+    projects: 'Projects', certifications: 'Certifications',
+};
+const LABELS_DE = {
+    profile: 'Profil', experience: 'Berufserfahrung', education: 'Bildung',
+    skills: 'Fähigkeiten', languages: 'Sprachen', interests: 'Interessen',
+    projects: 'Projekte', certifications: 'Zertifikate',
+};
+
+/* ─── Photo size / shape helpers ─── */
+const PHOTO_SIZE_MAP = { small: 56, medium: 76, large: 100 };
+
 /* ─── helpers ─── */
 const rgba = (hex, a) => {
     const r = parseInt(hex.slice(1, 3), 16);
@@ -105,6 +140,7 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
     const projects = data.projects || [];
     const interests = data.interests || [];
     const hobbies = data.hobbies || data.hobbies_text || '';
+    const customSections = data.custom_sections || [];
     const summary = pi.summary || data.profile_summary || '';
     const name = pi.name || data.full_name || '';
     const title = pi.title || pi.jobTitle || data.title || '';
@@ -113,6 +149,16 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
     const location = pi.location || data.location || '';
     const linkedin = pi.linkedin || pi.linkedin_url || data.linkedin_url || '';
     const website = pi.website || '';
+
+    // Language detection
+    const isGerman = detectGerman(data);
+    const L = isGerman ? LABELS_DE : LABELS_EN;
+
+    // Photo shape / size
+    const photoSizePx = typeof pi.photoSize === 'number'
+        ? pi.photoSize
+        : (PHOTO_SIZE_MAP[pi.photoSize] || 76);
+    const photoRadius = pi.photoShape === 'square' ? '6px' : '50%';
 
     const sTitle = (label, icon) => <SectionTitle label={label} color={primary} border={primaryBorder} style={accentStyle} icon={icon} />;
 
@@ -146,6 +192,7 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
 
     /* ─── CLEAN layout (matches reference PDF) ─── */
     if (theme.layout === 'clean') {
+        const currentLabel = isGerman ? 'Heute' : 'Present';
         return (
             <div style={{ width: 794, minHeight: 1123, fontFamily: theme.fontFamily, fontSize: 9, lineHeight: '14px', color: '#1a1a1a', background: 'white', padding: '32px 36px 24px' }}>
 
@@ -162,14 +209,14 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
                             {website && <span>🔗 {website}</span>}
                         </div>
                     </div>
-                    {photo && <img src={photo} alt="Profile" style={{ width: 76, height: 76, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: '2px solid #e5e7eb' }} />}
+                    {photo && <img src={photo} alt="Profile" style={{ width: photoSizePx, height: photoSizePx, borderRadius: photoRadius, objectFit: 'cover', flexShrink: 0, border: '2px solid #e5e7eb' }} />}
                 </div>
-                <div style={{ height: 2, background: '#1a1a1a', marginBottom: 14 }} />
+                <div style={{ height: 1, background: '#e5e7eb', marginBottom: 14 }} />
 
                 {/* Profile */}
                 {summary && (
                     <div style={{ marginBottom: 12 }}>
-                        {sTitle('Profil', '👤')}
+                        {sTitle(L.profile, '👤')}
                         <p style={{ margin: 0, color: '#374151', lineHeight: '16px', textAlign: 'justify' }}>{summary}</p>
                     </div>
                 )}
@@ -177,7 +224,7 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
                 {/* Experience */}
                 {experiences.length > 0 && (
                     <div style={{ marginBottom: 12 }}>
-                        {sTitle('Berufserfahrung', '💼')}
+                        {sTitle(L.experience, '💼')}
                         {experiences.map((exp, i) => (
                             <div key={i} style={{ marginBottom: 9 }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -187,7 +234,7 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
                                         {exp.location && <span style={{ color: '#888' }}> — {exp.location}</span>}
                                     </div>
                                     <span style={{ color: '#888', fontSize: 7.5, whiteSpace: 'nowrap', marginLeft: 10 }}>
-                                        {exp.startDate}{(exp.startDate && (exp.endDate || exp.current)) ? ' – ' : ''}{exp.current ? 'Heute' : exp.endDate}
+                                        {exp.startDate}{(exp.startDate && (exp.endDate || exp.current)) ? ' – ' : ''}{exp.current ? currentLabel : exp.endDate}
                                     </span>
                                 </div>
                                 {exp.description && (
@@ -208,7 +255,7 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
                 {/* Education */}
                 {education.length > 0 && (
                     <div style={{ marginBottom: 12 }}>
-                        {sTitle('Bildung', '🎓')}
+                        {sTitle(L.education, '🎓')}
                         {education.map((edu, i) => (
                             <div key={i} style={{ marginBottom: 7 }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -220,7 +267,7 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
                                         {edu.startDate}{edu.startDate && edu.endDate ? ' – ' : ''}{edu.endDate}
                                     </span>
                                 </div>
-                                {edu.grade && <div style={{ color: '#888', marginTop: 2, fontSize: 8 }}>Note: {edu.grade}</div>}
+                                {edu.grade && <div style={{ color: '#888', marginTop: 2, fontSize: 8 }}>{isGerman ? 'Note' : 'Grade'}: {edu.grade}</div>}
                             </div>
                         ))}
                     </div>
@@ -229,7 +276,7 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
                 {/* Skills */}
                 {(skills.length > 0 || skillCategories) && (
                     <div style={{ marginBottom: 12 }}>
-                        {sTitle('Fähigkeiten', '⚡')}
+                        {sTitle(L.skills, '⚡')}
                         {renderSkills()}
                     </div>
                 )}
@@ -237,7 +284,7 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
                 {/* Languages */}
                 {langs.length > 0 && (
                     <div style={{ marginBottom: 12 }}>
-                        {sTitle('Sprachen', '🌐')}
+                        {sTitle(L.languages, '🌐')}
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '3px 0' }}>
                             {langs.map((l, i) => (
                                 <div key={i} style={{ display: 'flex', gap: 6 }}>
@@ -252,7 +299,7 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
                 {/* Interests / Hobbies */}
                 {(interests.length > 0 || hobbies) && (
                     <div style={{ marginBottom: 12 }}>
-                        {sTitle('Interessen', '🎯')}
+                        {sTitle(L.interests, '🎯')}
                         {interests.length > 0 ? (
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px 16px' }}>
                                 {interests.map((interest, i) => {
@@ -269,7 +316,7 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
                 {/* Projects */}
                 {projects.length > 0 && (
                     <div style={{ marginBottom: 12 }}>
-                        {sTitle('Projekte', '🚀')}
+                        {sTitle(L.projects, '🚀')}
                         {projects.map((p, i) => (
                             <div key={i} style={{ marginBottom: 6 }}>
                                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
@@ -285,7 +332,7 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
                 {/* Certifications */}
                 {certs.length > 0 && (
                     <div style={{ marginBottom: 12 }}>
-                        {sTitle('Zertifikate', '🏅')}
+                        {sTitle(L.certifications, '🏅')}
                         {certs.map((c, i) => (
                             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                                 <div>
@@ -297,6 +344,14 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
                         ))}
                     </div>
                 )}
+
+                {/* Custom Sections */}
+                {customSections.filter(cs => cs.title && cs.content).map((cs, i) => (
+                    <div key={i} style={{ marginBottom: 12 }}>
+                        {sTitle(cs.title, '📌')}
+                        <p style={{ margin: 0, color: '#374151', lineHeight: '16px', whiteSpace: 'pre-wrap' }}>{cs.content}</p>
+                    </div>
+                ))}
             </div>
         );
     }
@@ -307,7 +362,7 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
             <div style={{ width: 794, minHeight: 1123, fontFamily: theme.fontFamily, fontSize: 9, lineHeight: '14px', color: '#1a1a1a', display: 'flex', background: 'white' }}>
                 {/* Sidebar */}
                 <div style={{ width: 220, background: primary, color: 'white', padding: '20px 14px', flexShrink: 0 }}>
-                    {photo && <img src={photo} alt="Profile" style={{ width: 76, height: 76, borderRadius: '50%', objectFit: 'cover', display: 'block', margin: '0 auto 12px', border: '3px solid rgba(255,255,255,0.4)' }} />}
+                    {photo && <img src={photo} alt="Profile" style={{ width: photoSizePx, height: photoSizePx, borderRadius: photoRadius, objectFit: 'cover', display: 'block', margin: '0 auto 12px', border: '3px solid rgba(255,255,255,0.4)' }} />}
                     <h1 style={{ fontSize: 14, fontWeight: 800, margin: '0 0 3px', lineHeight: 1.2, textAlign: 'center' }}>{name || 'Your Name'}</h1>
                     {title && <p style={{ fontSize: 8.5, opacity: 0.8, margin: '0 0 12px', textAlign: 'center' }}>{title}</p>}
                     <div style={{ borderTop: '1px solid rgba(255,255,255,0.25)', paddingTop: 10, marginBottom: 12 }}>
@@ -365,7 +420,7 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
                             <h1 style={{ fontSize: 22, fontWeight: 800, margin: '0 0 3px' }}>{name || 'Your Name'}</h1>
                             {title && <p style={{ fontSize: 10, opacity: 0.85, margin: 0 }}>{title}</p>}
                         </div>
-                        {photo && <img src={photo} alt="Profile" style={{ width: 64, height: 64, borderRadius: '50%', objectFit: 'cover', border: '3px solid rgba(255,255,255,0.4)' }} />}
+                        {photo && <img src={photo} alt="Profile" style={{ width: photoSizePx, height: photoSizePx, borderRadius: photoRadius, objectFit: 'cover', border: '3px solid rgba(255,255,255,0.4)' }} />}
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px 14px', marginTop: 8, opacity: 0.9, fontSize: 7.5 }}>
                         {email && <span>✉ {email}</span>}{phone && <span>✆ {phone}</span>}{location && <span>📍 {location}</span>}{linkedin && <span>in {linkedin}</span>}
@@ -412,7 +467,7 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
                                 {email && <span>✉ {email}</span>}{phone && <span>✆ {phone}</span>}{location && <span>📍 {location}</span>}{linkedin && <span>in {linkedin}</span>}
                             </div>
                         </div>
-                        {photo && <img src={photo} alt="Profile" style={{ width: 56, height: 56, borderRadius: 6, objectFit: 'cover' }} />}
+                        {photo && <img src={photo} alt="Profile" style={{ width: photoSizePx, height: photoSizePx, borderRadius: photoRadius, objectFit: 'cover' }} />}
                     </div>
                 </div>
                 {summary && <><SectionTitle label="Profile" color={primary} border={primaryBorder} style={accentStyle} /><p style={{ margin: '0 0 10px', color: '#374151' }}>{summary}</p></>}
@@ -430,6 +485,13 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
                 )}
                 {certs.length > 0 && <div style={{ marginTop: 10 }}><SectionTitle label="Certifications" color={primary} border={primaryBorder} style={accentStyle} />{certs.map((c, i) => <div key={i} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}><div><span style={{ fontWeight: 600 }}>{c.name}</span>{c.issuer && <span style={{ color: '#6b7280' }}> — {c.issuer}</span>}</div><span style={{ color: '#6b7280', fontSize: 7.5 }}>{c.issueDate || c.date}</span></div>)}</div>}
                 {projects.length > 0 && <div style={{ marginTop: 10 }}><SectionTitle label="Projects" color={primary} border={primaryBorder} style={accentStyle} />{projects.map((p, i) => <div key={i} style={{ marginBottom: 5 }}><span style={{ fontWeight: 700 }}>{p.name}</span>{(p.link || p.url) && <span style={{ color: primary, fontSize: 7.5, marginLeft: 5 }}>{p.link || p.url}</span>}{p.description && <div style={{ color: '#555', marginTop: 1 }}>{p.description}</div>}</div>)}</div>}
+                {/* Custom Sections */}
+                {customSections.filter(cs => cs.title && cs.content).map((cs, i) => (
+                    <div key={i} style={{ marginTop: 10 }}>
+                        <SectionTitle label={cs.title} color={primary} border={primaryBorder} style={accentStyle} />
+                        <p style={{ margin: 0, color: '#374151', lineHeight: '16px', whiteSpace: 'pre-wrap' }}>{cs.content}</p>
+                    </div>
+                ))}
             </div>
         );
     }
@@ -443,7 +505,7 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
                         <h1 style={{ fontSize: 20, fontWeight: 800, margin: 0, letterSpacing: '-0.02em', lineHeight: 1.2 }}>{name || 'Your Name'}</h1>
                         {title && <p style={{ fontSize: 10, fontWeight: 400, margin: '3px 0 0', opacity: 0.85 }}>{title}</p>}
                     </div>
-                    {photo && <img src={photo} alt="Profile" style={{ width: 58, height: 58, borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(255,255,255,0.4)', flexShrink: 0 }} />}
+                    {photo && <img src={photo} alt="Profile" style={{ width: photoSizePx, height: photoSizePx, borderRadius: photoRadius, objectFit: 'cover', border: '2px solid rgba(255,255,255,0.4)', flexShrink: 0 }} />}
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginTop: 8, opacity: 0.9, fontSize: 7.5 }}>
                     {email && <span>✉ {email}</span>}{phone && <span>✆ {phone}</span>}{location && <span>📍 {location}</span>}{linkedin && <span>in {linkedin}</span>}{website && <span>🔗 {website}</span>}
@@ -465,6 +527,13 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1 }) => {
                 )}
                 {certs.length > 0 && <div style={{ marginBottom: 10 }}><SectionTitle label="Certifications" color={primary} border={primaryBorder} style={accentStyle} />{certs.map((c, i) => <div key={i} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}><div><span style={{ fontWeight: 600 }}>{c.name}</span>{c.issuer && <span style={{ color: '#6b7280' }}> — {c.issuer}</span>}</div><span style={{ color: '#6b7280', fontSize: 7.5 }}>{c.issueDate || c.date}</span></div>)}</div>}
                 {projects.length > 0 && <div><SectionTitle label="Projects" color={primary} border={primaryBorder} style={accentStyle} />{projects.map((p, i) => <div key={i} style={{ marginBottom: 5 }}><span style={{ fontWeight: 700 }}>{p.name}</span>{(p.link || p.url) && <span style={{ color: primary, fontSize: 7.5, marginLeft: 5 }}>{p.link || p.url}</span>}{p.description && <div style={{ color: '#555', marginTop: 1 }}>{p.description}</div>}</div>)}</div>}
+                {/* Custom Sections */}
+                {customSections.filter(cs => cs.title && cs.content).map((cs, i) => (
+                    <div key={i}>
+                        <SectionTitle label={cs.title} color={primary} border={primaryBorder} style={accentStyle} />
+                        <p style={{ margin: '0 0 8px', color: '#374151', lineHeight: '16px', whiteSpace: 'pre-wrap' }}>{cs.content}</p>
+                    </div>
+                ))}
             </div>
         </div>
     );

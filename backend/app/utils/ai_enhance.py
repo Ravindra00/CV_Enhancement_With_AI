@@ -237,17 +237,21 @@ def groq_suggestions(cv_data: Dict[str, Any], job_desc: str, missing: List[str],
         from groq import Groq
         client = Groq(api_key=api_key)
 
-        pi = cv_data.get('personalInfo', {}) or {}
-        exps = cv_data.get('experience', []) or []
+        # Support both camelCase and snake_case CV data formats
+        pi = cv_data.get('personalInfo') or cv_data.get('personal_info') or {}
+        exps = (cv_data.get('experience') or cv_data.get('experiences') or [])
         skills = cv_data.get('skills', []) or []
 
-        # Build a concise CV summary to send to the model
-        cv_summary = f"""Name: {pi.get('name', 'Candidate')}
-Current role: {pi.get('jobTitle', 'N/A')}
-Skills: {', '.join(skills[:20]) if skills else 'None listed'}
+        name = pi.get('name', 'Candidate')
+        job_title = pi.get('jobTitle') or pi.get('job_title') or 'N/A'
+        skill_names = [s if isinstance(s, str) else (s.get('name') or '') for s in skills[:20]]
+
+        cv_summary = f"""Name: {name}
+Current role: {job_title}
+Skills: {', '.join(skill_names) if skill_names else 'None listed'}
 Experience: {len(exps)} positions
-Latest role: {exps[0].get('role', 'N/A')} at {exps[0].get('company', 'N/A')} ({exps[0].get('startDate', '')}–{exps[0].get('endDate', 'Present')}) if exps else 'None'
-Summary exists: {'Yes' if cv_data.get('summary') else 'No'}
+Latest role: {exps[0].get('role') or exps[0].get('position', 'N/A')} at {exps[0].get('company', 'N/A')} ({exps[0].get('startDate','')}–{exps[0].get('endDate','Present')}) if exps else 'None'
+Summary exists: {'Yes' if cv_data.get('summary') or cv_data.get('profile_summary') else 'No'}
 Keyword match score: {score}/100
 Missing keywords: {', '.join(missing[:10])}"""
 

@@ -59,18 +59,22 @@ def _rgba_rl(hexstr: str, alpha=1.0):
 def _detect_german(cv_data: dict) -> bool:
     """Heuristic: Is this CV predominantly German?"""
     sample = ""
-    pi = cv_data.get('personalInfo') or {}
-    sample += (pi.get('jobTitle') or '') + ' '
-    summary = cv_data.get('summary') or ''
+    # Check both camelCase (personalInfo) and snake_case (personal_info) keys
+    pi_camel = cv_data.get('personalInfo') or {}
+    pi_snake = cv_data.get('personal_info') or {}
+    sample += (pi_camel.get('jobTitle') or pi_camel.get('title') or '') + ' '
+    sample += (pi_snake.get('title') or pi_snake.get('jobTitle') or '') + ' '
+    summary = cv_data.get('summary') or cv_data.get('profile_summary') or ''
     sample += summary[:400] + ' '
-    for exp in (cv_data.get('experience') or [])[:2]:
+    # Check both singular (experience) and plural (experiences) keys
+    for exp in ((cv_data.get('experience') or []) + (cv_data.get('experiences') or []))[:3]:
         sample += (exp.get('description') or '')[:200] + ' '
     sample = sample.lower()
 
     # Distinctively German words/suffixes unlikely to appear in English text
     german_markers = [
-        'erfahrung', 'kenntnisse', 'fähigkeiten', 'verantwortlich',
-        'unternehmen', 'tätigkeiten', 'entwicklung', 'aufgaben',
+        'erfahrung', 'kenntnisse', 'f\u00e4higkeiten', 'verantwortlich',
+        'unternehmen', 't\u00e4tigkeiten', 'entwicklung', 'aufgaben',
         'bereich', 'mittels', 'wurden', 'wurde', 'habe', 'haben',
         'leitung', 'planung', 'umsetzung', 'werkzeug', 'arbeit',
         'datenbankadministrator', 'softwareentwickler', 'ingenieur',
@@ -80,20 +84,35 @@ def _detect_german(cv_data: dict) -> bool:
 
 
 def flatten_skills(skills) -> list:
-    """Normalize skills: handle list of strings, list of dicts, or dict of categories."""
+    """Normalize skills to a flat list of strings."""
     if not skills:
         return []
     if isinstance(skills, list):
         return [s if isinstance(s, str) else (s.get('name') or '') for s in skills if s]
     if isinstance(skills, dict):
         result = []
-        for cat, items in skills.items():
+        for items in skills.values():
             if isinstance(items, list):
-                result.append(f"  {cat}:  " + '  ·  '.join(
-                    (s if isinstance(s, str) else s.get('name', '')) for s in items if s
-                ))
-        return [r for r in result if r.strip()]
+                result.extend(
+                    (s if isinstance(s, str) else s.get('name', ''))
+                    for s in items if s
+                )
+        return [s for s in result if s]
     return []
+
+
+def skills_as_categories(skills):
+    """Return list of (category_name, [items]) tuples if skills is a dict, else None."""
+    if not skills or not isinstance(skills, dict):
+        return None
+    result = []
+    for cat, items in skills.items():
+        if isinstance(items, list):
+            flat = [(s if isinstance(s, str) else s.get('name', '')) for s in items if s]
+            flat = [f for f in flat if f]
+            if flat:
+                result.append((cat, flat))
+    return result if result else None
 
 
 def generate_cv_pdf(
@@ -158,6 +177,63 @@ def generate_cv_pdf(
     base_labels = DEFAULT_LABELS_DE if is_german else DEFAULT_LABELS_EN
     labels = {**base_labels, **(cv_data.get('sectionLabels') or {})}
 
+    # Photo path resolution
+    photo_path = pi.get('photo') or cv_data.get('photo_path') or ''
+    photo_abs = ''
+    if photo_path:
+        # photo_path is usually like '/uploads/photo.jpg' or 'uploads/photo.jpg'
+        # Resolve relative to the backend project root
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        clean_path = photo_path.lstrip('/')
+        candidate = os.path.join(backend_dir, clean_path)
+        if os.path.isfile(candidate):
+            photo_abs = candidate
+
+    def _make_photo_image(size_pts=72):
+        """Return an RLImage for the profile photo with EXIF auto-rotation, or None."""
+        if not photo_abs:
+            return None
+        try:
+            # Use Pillow to auto-correct EXIF orientation
+            from PIL import Image as PILImage, ExifTags
+            import tempfile
+
+            pil_img = PILImage.open(photo_abs)
+
+            # Auto-rotate based on EXIF orientation tag
+            try:
+                exif = pil_img._getexif()
+                if exif:
+                    for tag_id, value in exif.items():
+                        tag = ExifTags.TAGS.get(tag_id, tag_id)
+                        if tag == 'Orientation':
+                            rotations = {3: 180, 6: 270, 8: 90}
+                            if value in rotations:
+                                pil_img = pil_img.rotate(rotations[value], expand=True)
+                            break
+            except (AttributeError, Exception):
+                pass  # No EXIF or not a JPEG — just use as-is
+
+            # Convert to RGB (handles RGBA PNGs etc.)
+            if pil_img.mode not in ('RGB', 'L'):
+                pil_img = pil_img.convert('RGB')
+
+            # Save to a temp PNG so ReportLab can render it cleanly
+            tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+            pil_img.save(tmp.name, 'PNG')
+            tmp.close()
+
+            img = RLImage(tmp.name, width=size_pts, height=size_pts)
+            return img
+        except ImportError:
+            # Pillow not installed — fall back to simple RLImage (no EXIF fix)
+            try:
+                return RLImage(photo_abs, width=size_pts, height=size_pts)
+            except Exception:
+                return None
+        except Exception:
+            return None
+
     # ----- Document -----
     is_modern_sidebar = (layout == 'modern')
     margin = 1.6 * cm
@@ -199,21 +275,41 @@ def generate_cv_pdf(
             story.append(Paragraph(f'<b>{label.upper()}</b>', section_s))
             story.append(HRFlowable(width='100%', thickness=1.5, color=_hex_to_rl(primary_hex), spaceAfter=5))
 
-        # ── Header (name + photo row) ──
+        # ── Header (name + contact + optional photo) ──
         contact_parts = []
-        if email:    contact_parts.append(f'✉  {email}')
-        if phone:    contact_parts.append(f'✆  {phone}')
-        if location: contact_parts.append(f'📍  {location}')
+        if email:    contact_parts.append(f'\u2709  {email}')
+        if phone:    contact_parts.append(f'\u2706  {phone}')
+        if location: contact_parts.append(f'\ud83d\udccd  {location}')
         if linkedin: contact_parts.append(f'in  {linkedin}')
-        if website:  contact_parts.append(f'🔗  {website}')
+        if website:  contact_parts.append(f'\ud83d\udd17  {website}')
         contact_line = '    |    '.join(contact_parts)
 
+        name_block = [Paragraph(name, name_style)]
+        if job_headline: name_block.append(Paragraph(job_headline, title_style_p))
+        if contact_line: name_block.append(Paragraph(contact_line, contact_style_p))
+
         story.append(Spacer(1, 12))
-        story.append(Paragraph(name, name_style))
-        if job_headline:
-            story.append(Paragraph(job_headline, title_style_p))
-        if contact_line:
-            story.append(Paragraph(contact_line, contact_style_p))
+
+        photo_img = _make_photo_image(size_pts=54)
+        if photo_img:
+            # Two-column header: name+contact on left, photo on right
+            header_row = [[name_block, photo_img]]
+            photo_col_w = 58
+            text_col_w = doc.width - photo_col_w
+            ht = Table(header_row, colWidths=[text_col_w, photo_col_w])
+            ht.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+                ('TOPPADDING', (0, 0), (-1, -1), 0),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ]))
+            story.append(ht)
+        else:
+            for p in name_block:
+                story.append(p)
+
         story.append(Spacer(1, 8))
         story.append(HRFlowable(width='100%', thickness=2, color=TEXT, spaceAfter=12))
 
@@ -266,10 +362,46 @@ def generate_cv_pdf(
                     story.append(Paragraph(f'<font color="#6b7280">Note: {edu["grade"]}</font>', sub_style))
                 story.append(Spacer(1, 4))
 
-        if skills_flat:
+        if skills:
             section_header(labels['skills'])
-            for skill_line in skills_flat:
-                story.append(Paragraph(skill_line.strip(), body_style))
+            cats = skills_as_categories(cv_data.get('skills') or [])
+            if cats:
+                # Render each category as header + 3-col skill pills
+                for cat_name, cat_items in cats:
+                    story.append(Paragraph(f'<font color="#4b5563"><b>{cat_name}:</b></font>', sub_style))
+                    cols = 3
+                    cells = [Paragraph(f'\u2022 {s}', body_style) for s in cat_items if s]
+                    while len(cells) % cols != 0:
+                        cells.append(Paragraph('', body_style))
+                    rows = [cells[i:i+cols] for i in range(0, len(cells), cols)]
+                    col_w = doc.width / cols
+                    t = Table(rows, colWidths=[col_w]*cols)
+                    t.setStyle(TableStyle([
+                        ('TOPPADDING', (0,0), (-1,-1), 1),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+                        ('LEFTPADDING', (0,0), (-1,-1), 0),
+                        ('RIGHTPADDING', (0,0), (-1,-1), 2),
+                        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                    ]))
+                    story.append(t)
+                    story.append(Spacer(1, 3))
+            else:
+                # Flat list — 3 columns
+                cols = 3
+                skill_cells = [Paragraph(f'\u2022 {s.strip()}', body_style) for s in skills_flat if s.strip()]
+                while len(skill_cells) % cols != 0:
+                    skill_cells.append(Paragraph('', body_style))
+                rows = [skill_cells[i:i+cols] for i in range(0, len(skill_cells), cols)]
+                col_w = doc.width / cols
+                skills_table = Table(rows, colWidths=[col_w] * cols)
+                skills_table.setStyle(TableStyle([
+                    ('TOPPADDING', (0,0), (-1,-1), 1),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+                    ('LEFTPADDING', (0,0), (-1,-1), 0),
+                    ('RIGHTPADDING', (0,0), (-1,-1), 2),
+                    ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                ]))
+                story.append(skills_table)
             story.append(Spacer(1, 2))
 
         if langs:
@@ -328,27 +460,46 @@ def generate_cv_pdf(
             story.append(Paragraph(f'<font color="{primary_hex}"><b>{label.upper()}</b></font>', section_s2))
             story.append(HRFlowable(width='100%', thickness=0.5, color=PRIMARY, spaceAfter=4))
 
-        # ── Colored header ──
+        # ── Colored header with optional photo ──
         contact_parts = []
-        if email:    contact_parts.append(f'✉  {email}')
-        if phone:    contact_parts.append(f'✆  {phone}')
-        if location: contact_parts.append(f'⌖  {location}')
+        if email:    contact_parts.append(f'\u2709  {email}')
+        if phone:    contact_parts.append(f'\u2706  {phone}')
+        if location: contact_parts.append(f'\u231b  {location}')
         if linkedin: contact_parts.append(f'in  {linkedin}')
-        if website:  contact_parts.append(f'🔗  {website}')
+        if website:  contact_parts.append(f'\ud83d\udd17  {website}')
         contact_line = '    |    '.join(contact_parts)
 
-        header_content = [Paragraph(name, name_style)]
-        if job_headline: header_content.append(Paragraph(job_headline, title_style2))
-        if contact_line: header_content.append(Paragraph(contact_line, contact_s2))
+        name_block = [Paragraph(name, name_style)]
+        if job_headline: name_block.append(Paragraph(job_headline, title_style2))
+        if contact_line: name_block.append(Paragraph(contact_line, contact_s2))
 
-        header_table = Table([[p] for p in header_content], colWidths=[doc.width + 2*margin])
+        photo_img = _make_photo_image(size_pts=50)
+        if photo_img:
+            # Two-column header inside colored band: text left, photo right
+            header_col_data = [[name_block, photo_img]]
+            photo_col_w = 56
+            text_col_w = doc.width + 2 * margin - photo_col_w - 36
+            header_inner = Table(header_col_data, colWidths=[text_col_w, photo_col_w])
+            header_inner.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+                ('TOPPADDING', (0, 0), (-1, -1), 0),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ]))
+            header_table = Table([[header_inner]], colWidths=[doc.width + 2 * margin])
+        else:
+            header_content = name_block
+            header_table = Table([[p] for p in header_content], colWidths=[doc.width + 2 * margin])
+
         header_table.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,-1), PRIMARY),
-            ('TOPPADDING', (0,0), (-1,0), 16),
-            ('BOTTOMPADDING', (0,-1), (-1,-1), 14),
-            ('LEFTPADDING', (0,0), (-1,-1), 18),
-            ('RIGHTPADDING', (0,0), (-1,-1), 18),
-            ('TOPPADDING', (0,1), (-1,-1), 2),
+            ('BACKGROUND', (0, 0), (-1, -1), PRIMARY),
+            ('TOPPADDING', (0, 0), (-1, 0), 16),
+            ('BOTTOMPADDING', (0, -1), (-1, -1), 14),
+            ('LEFTPADDING', (0, 0), (-1, -1), 18),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 18),
+            ('TOPPADDING', (0, 1), (-1, -1), 2),
         ]))
         story.append(header_table)
         story.append(Spacer(1, 10))
@@ -403,7 +554,21 @@ def generate_cv_pdf(
 
         if skills_flat:
             section_header(labels['skills'])
-            for sl in skills_flat: story.append(Paragraph(sl.strip(), body_style))
+            cols = 3
+            skill_cells = [Paragraph(f'\u2022 {s.strip()}', body_style) for s in skills_flat if s.strip()]
+            while len(skill_cells) % cols != 0:
+                skill_cells.append(Paragraph('', body_style))
+            rows = [skill_cells[i:i+cols] for i in range(0, len(skill_cells), cols)]
+            col_w = doc.width / cols
+            skills_table = Table(rows, colWidths=[col_w] * cols)
+            skills_table.setStyle(TableStyle([
+                ('TOPPADDING', (0,0), (-1,-1), 1),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+                ('LEFTPADDING', (0,0), (-1,-1), 0),
+                ('RIGHTPADDING', (0,0), (-1,-1), 2),
+                ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ]))
+            story.append(skills_table)
 
         if langs:
             section_header(labels['languages'])

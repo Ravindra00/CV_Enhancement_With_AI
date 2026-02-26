@@ -117,4 +117,12 @@ export const jobApplicationAPI = {
   getStats: () => apiClient.get('/job-applications/stats'),
 };
 
+// ── Admin (Superuser) ─────────────────────────────────────────────────────────
+export const adminAPI = {
+  getStats: () => apiClient.get('/admin/stats'),
+  getUsers: () => apiClient.get('/admin/users'),
+  updateUser: (id, data) => apiClient.patch(`/admin/users/${id}`, data),
+  deleteUser: (id) => apiClient.delete(`/admin/users/${id}`),
+};
+
 export default apiClient;

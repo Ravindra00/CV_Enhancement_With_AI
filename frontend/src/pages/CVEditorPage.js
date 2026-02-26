@@ -329,7 +329,15 @@ const CVEditorPage = () => {
               <><svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Saving…</>
             ) : saved ? '✓ Saved' : '💾 Save'}
           </button>
-          <button onClick={() => cvAPI.exportPDF(id, title)} className="px-3 py-1.5 bg-primary text-white text-xs font-semibold rounded-lg hover:bg-primary-700 transition">↓ PDF</button>
+          <button
+            onClick={async () => {
+              try {
+                await cvAPI.update(id, buildPayload(cvData, title));
+              } catch (_) { }
+              await cvAPI.exportPDF(id, title);
+            }}
+            className="px-3 py-1.5 bg-primary text-white text-xs font-semibold rounded-lg hover:bg-primary-700 transition"
+          >↓ PDF</button>
         </div>
       </div>
 
@@ -342,25 +350,58 @@ const CVEditorPage = () => {
           {open.personal && (
             <div className="space-y-3 pt-1">
               {/* Photo upload */}
-              <div className="flex items-center gap-4">
-                <div className="relative">
+              <div className="flex items-start gap-4">
+                <div className="relative flex-shrink-0">
                   {cvData.personal_info?.photo ? (() => {
                     const photoSrc = cvData.personal_info.photo.startsWith('/uploads/')
                       ? `${process.env.REACT_APP_API_URL?.replace('/api', '') || 'http://localhost:8000'}${cvData.personal_info.photo}`
                       : cvData.personal_info.photo;
-                    return <img src={photoSrc} alt="Profile" className="w-16 h-16 rounded-full object-cover border-2 border-primary-200" />;
+                    const photoSz = typeof cvData.personal_info.photoSize === 'number'
+                      ? cvData.personal_info.photoSize
+                      : ({ small: 56, medium: 76, large: 100 }[cvData.personal_info.photoSize] || 76);
+                    const photoRad = cvData.personal_info.photoShape === 'square' ? '6px' : '50%';
+                    return <img src={photoSrc} alt="Profile"
+                      style={{ width: photoSz, height: photoSz, borderRadius: photoRad, objectFit: 'cover', border: '2px solid #c7d2fe' }} />;
                   })()
                     : <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 text-2xl border-2 border-dashed border-gray-300">👤</div>
                   }
                   <button onClick={() => photoRef.current?.click()} className="absolute -bottom-1 -right-1 bg-primary text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-primary-700 shadow">+</button>
                 </div>
-                <div>
+                <div className="flex-1">
                   <p className="text-xs font-semibold text-gray-700 mb-1">Profile Photo</p>
                   <button onClick={() => photoRef.current?.click()} disabled={photoUploading} className="text-xs text-primary hover:underline disabled:opacity-50">
                     {photoUploading ? 'Uploading…' : 'Upload photo'}
                   </button>
-                  <p className="text-xs text-gray-400">JPG, PNG, WebP</p>
+                  <p className="text-xs text-gray-400 mb-2">JPG, PNG, WebP</p>
                   <input ref={photoRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+                  {/* Shape & Size controls */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-semibold text-gray-500 w-10">Shape</span>
+                      {[{ key: 'round', label: '⬤ Round' }, { key: 'square', label: '⬛ Square' }].map(({ key, label }) => (
+                        <button key={key}
+                          onClick={() => updatePI('photoShape', key)}
+                          className={`text-[10px] px-2.5 py-1 rounded-md font-medium transition border ${(cvData.personal_info?.photoShape || 'round') === key
+                            ? 'bg-primary text-white border-primary'
+                            : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-primary hover:text-primary'
+                            }`}
+                        >{label}</button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-semibold text-gray-500 w-10">Size</span>
+                      <input
+                        type="range"
+                        min="40" max="160" step="4"
+                        value={cvData.personal_info?.photoSize || 76}
+                        onChange={e => updatePI('photoSize', parseInt(e.target.value))}
+                        className="flex-1 h-1.5 accent-primary"
+                      />
+                      <span className="text-[10px] font-semibold text-gray-600 w-10 text-right">
+                        {cvData.personal_info?.photoSize || 76}px
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -549,11 +590,26 @@ const CVEditorPage = () => {
           )}
         </div>
 
-        {/* Right: A4 preview */}
-        <div className="flex-1 overflow-y-auto bg-gray-100 flex flex-col items-center py-8 px-4">
-          <div style={{ transform: 'scale(0.82)', transformOrigin: 'top center', width: 794, marginBottom: -180 }}>
-            <div className="shadow-2xl rounded-sm overflow-hidden">
-              <CVPreview data={cvData} theme={theme} />
+        {/* Right: A4 page preview — fills remaining space */}
+        <div className="flex-1 overflow-y-auto bg-gray-200 flex flex-col items-center py-6 px-2 min-w-0">
+          {/* 
+            CVPreview renders at 794px (A4 width at 96dpi).
+            We scale it to fit the panel width. 
+            A4 aspect = 1123/794 ≈ 1.414 — the outer wrapper maintains this so scrollbar reflects full page.
+          */}
+          <div style={{ width: '100%', maxWidth: 794, position: 'relative' }}>
+            <div style={{ width: 794, transform: 'scale(var(--s,1))', transformOrigin: 'top left' }}
+              ref={el => {
+                if (!el) return;
+                const parentW = el.parentElement?.offsetWidth || 794;
+                const s = Math.min(1, parentW / 794);
+                el.style.setProperty('--s', s);
+                el.parentElement.style.height = (1123 * s) + 'px';
+              }}
+            >
+              <div className="shadow-2xl rounded-sm overflow-hidden">
+                <CVPreview data={cvData} theme={theme} />
+              </div>
             </div>
           </div>
         </div>

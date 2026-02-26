@@ -27,6 +27,8 @@ class UserCreate(UserBase):
 class UserResponse(UserBase):
     id: int
     is_active: bool
+    is_superuser: bool = False
+    ai_access: bool = True
     created_at: datetime
 
     class Config:

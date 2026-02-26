@@ -10,7 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError, ProgrammingError
 
 from app.config import CORS_ORIGINS, API_TITLE, API_VERSION, API_DESCRIPTION
 from app.database import Base, engine
-from app.routes import auth, cvs, cover_letters, job_applications
+from app.routes import auth, cvs, cover_letters, job_applications, admin
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -83,6 +83,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(cvs.router, prefix="/api")
 app.include_router(cover_letters.router, prefix="/api")
 app.include_router(job_applications.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
 
 @app.get("/")
 def read_root():

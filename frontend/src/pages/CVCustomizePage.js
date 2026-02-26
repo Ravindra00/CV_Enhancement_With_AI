@@ -30,6 +30,13 @@ const CVCustomizePage = () => {
   const [enhanceMsg, setEnhanceMsg] = useState('');
   const [enhanceStatus, setEnhanceStatus] = useState(''); // 'success'|'error'|''
 
+  // Save to Job Tracker form
+  const [showSaveJobForm, setShowSaveJobForm] = useState(false);
+  const [saveJobCompany, setSaveJobCompany] = useState('');
+  const [saveJobRole, setSaveJobRole] = useState('');
+  const [saveJobStatus, setSaveJobStatus] = useState('saved');
+  const [savingJob, setSavingJob] = useState(false);
+
   const [toast, setToast] = useState(null);
   const [previewScale, setPreviewScale] = useState(0.48);
 
@@ -216,6 +223,46 @@ const CVCustomizePage = () => {
     setEnhanceStatus('');
   };
 
+  // ── Save to Job Tracker ────────────────────────────────────────────────────────
+
+  const openSaveJobForm = () => {
+    // Pre-fill company and role from job description text
+    const jd = jobDescription.trim();
+    const lines = jd.split('\n').map(l => l.trim()).filter(Boolean);
+    const role = lines[0]?.substring(0, 120) || '';
+    const companyLine = lines.find(l => /\b(bei|at|for|@|company|firma|unternehmen|arbeitgeber)\b/i.test(l));
+    const company = companyLine ? companyLine.replace(/^.*?[:\-@]\s*/, '').substring(0, 80) : '';
+    setSaveJobRole(role);
+    setSaveJobCompany(company);
+    setSaveJobStatus('saved');
+    setShowSaveJobForm(true);
+  };
+
+  const handleSaveToJobTracker = async (e) => {
+    e.preventDefault();
+    if (!saveJobCompany.trim() && !saveJobRole.trim()) {
+      showToast('Please fill in at least company or role', 'error');
+      return;
+    }
+    setSavingJob(true);
+    try {
+      await jobApplicationAPI.create({
+        company: saveJobCompany.trim() || 'Unknown Company',
+        role: saveJobRole.trim() || 'Unknown Role',
+        status: saveJobStatus,
+        notes: `Saved from AI Enhancement. Job description:\n${jobDescription.substring(0, 500)}`,
+        applied_date: new Date().toISOString().slice(0, 10),
+        cv_id: parseInt(cvId),
+      });
+      showToast('📌 Saved to Job Tracker!');
+      setShowSaveJobForm(false);
+    } catch (err) {
+      showToast(err.response?.data?.detail || 'Could not save to Job Tracker', 'error');
+    } finally {
+      setSavingJob(false);
+    }
+  };
+
   // ── PDF download ──────────────────────────────────────────────────────────────
 
   const handleDownloadPDF = async () => {
@@ -383,6 +430,67 @@ const CVCustomizePage = () => {
                   )}
                 </button>
               </div>
+
+              {/* Save to Job Tracker button */}
+              {jobDescription.trim() && (
+                <div className="mt-2">
+                  {!showSaveJobForm ? (
+                    <button
+                      onClick={openSaveJobForm}
+                      className="w-full py-2 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 font-semibold text-xs rounded-xl transition flex items-center justify-center gap-1.5"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                      </svg>
+                      💾 Save to Job Tracker
+                    </button>
+                  ) : (
+                    <form onSubmit={handleSaveToJobTracker} className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+                      <p className="text-xs font-semibold text-amber-800 mb-1">📌 Save Job Opportunity</p>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-gray-600 mb-0.5">Company</label>
+                        <input
+                          value={saveJobCompany}
+                          onChange={e => setSaveJobCompany(e.target.value)}
+                          placeholder="e.g. Google"
+                          className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-200"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-gray-600 mb-0.5">Role</label>
+                        <input
+                          value={saveJobRole}
+                          onChange={e => setSaveJobRole(e.target.value)}
+                          placeholder="e.g. Software Engineer"
+                          className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-200"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-gray-600 mb-0.5">Status</label>
+                        <select
+                          value={saveJobStatus}
+                          onChange={e => setSaveJobStatus(e.target.value)}
+                          className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:border-amber-400"
+                        >
+                          <option value="saved">💾 Saved (Wishlist)</option>
+                          <option value="applied">📤 Applied</option>
+                          <option value="interview">🎯 Interview</option>
+                        </select>
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        <button type="submit" disabled={savingJob}
+                          className="flex-1 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white font-semibold text-xs rounded-lg transition">
+                          {savingJob ? 'Saving…' : '✓ Save'}
+                        </button>
+                        <button type="button" onClick={() => setShowSaveJobForm(false)}
+                          className="flex-1 py-1.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 font-semibold text-xs rounded-lg transition">
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* AI Enhancement Result Banner */}
