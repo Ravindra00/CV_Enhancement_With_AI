@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
@@ -6,9 +7,11 @@ from app.models import User, CV, Suggestion, CVCustomization
 from app.schemas import CVResponse, CVCreate, CVUpdate, CVCustomizationRequest, SuggestionResponse, ApplyAIChangesRequest
 from app.dependencies import get_current_user
 from app.utils.cv_parser import parse_cv_file
-from app.utils.ai_integration import analyze_cv, enhance_cv_for_job
+from app.utils.ai_integration import analyze_cv, enhance_cv_for_job, groq_enhance_sections
 from app.utils.ai_enhance import extract_keywords, compute_match_score, rule_based_suggestions, groq_suggestions
+from app.utils.pdf_generator import generate_cv_pdf
 import os
+import io
 from datetime import datetime
 
 router = APIRouter(prefix="/cvs", tags=["cvs"])
@@ -210,6 +213,8 @@ def _cv_to_response(cv: CV) -> dict:
         'languages': languages,
         'certifications': certifications,
         'interests': cv.interests if cv.interests is not None else [],
+        'custom_sections': getattr(cv, 'custom_sections', None) or [],
+        'theme': getattr(cv, 'theme', None) or {},
         'file_path': cv.file_path,
         'photo_path': cv.photo_path,
         'original_text': cv.original_text,
@@ -218,6 +223,7 @@ def _cv_to_response(cv: CV) -> dict:
         'created_at': cv.created_at,
         'updated_at': cv.updated_at,
     }
+
 
 
 def _build_cv_data_dict(cv: CV) -> dict:
@@ -367,6 +373,11 @@ def update_cv(
         cv.certifications = cv_data.certifications
     if cv_data.interests is not None:
         cv.interests = cv_data.interests
+    if cv_data.custom_sections is not None:
+        cv.custom_sections = cv_data.custom_sections
+    if cv_data.theme is not None:
+        cv.theme = cv_data.theme
+
 
     cv.updated_at = datetime.utcnow()
     db.commit()
@@ -475,18 +486,68 @@ def upload_photo(
 
     photo_dir = os.path.join(UPLOAD_DIR, "photos")
     os.makedirs(photo_dir, exist_ok=True)
-    photo_path = os.path.join(photo_dir, f"{cv_id}_{file.filename}")
-    with open(photo_path, "wb") as f:
+    safe_filename = f"{cv_id}_{file.filename}"
+    photo_path_fs = os.path.join(photo_dir, safe_filename)
+    with open(photo_path_fs, "wb") as f:
         f.write(file.file.read())
 
-    cv.photo_path = photo_path
+    # Store URL-accessible path so the frontend can display it directly
+    photo_url = f"/uploads/photos/{safe_filename}"
+    cv.photo_path = photo_url
     pi = _get_personal_info(cv)
-    pi['photo'] = photo_path
+    pi['photo'] = photo_url
     cv.personal_info = pi
     cv.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(cv)
-    return {"photo_path": photo_path}
+    return {"photo_path": photo_url}
+
+
+@router.get("/{cv_id}/export/pdf")
+def export_cv_pdf(
+    cv_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Generate and return a PDF version of the CV using stored theme."""
+    cv = db.query(CV).filter(CV.id == cv_id, CV.user_id == current_user.id).first()
+    if not cv:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
+
+    try:
+        pi = _get_personal_info(cv)
+        theme = (cv.theme if isinstance(getattr(cv, 'theme', None), dict) else None) or {}
+
+        cv_data_for_pdf = {
+            'personalInfo': pi,
+            'summary': pi.get('summary') or cv.profile_summary or '',
+            'experience': cv.experiences or [],
+            'education': cv.educations or [],
+            'skills': cv.skills or [],
+            'certifications': cv.certifications or [],
+            'languages': cv.languages or [],
+            'projects': cv.projects or [],
+            'interests': cv.interests or [],
+            'custom_sections': (
+                getattr(cv, 'custom_sections', None) or []
+            ),
+        }
+
+        pdf_bytes = generate_cv_pdf(cv_data_for_pdf, title=cv.title or 'CV', theme=theme)
+
+        filename = (cv.title or 'CV').replace(' ', '_') + '.pdf'
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type='application/pdf',
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"PDF generation failed: {str(e)}"
+        )
 
 
 # ── AI endpoints ───────────────────────────────────────────────────────────────
@@ -591,21 +652,30 @@ def enhance_cv_for_job_endpoint(
     db: Session = Depends(get_db)
 ):
     """
-    Generate an AI-enhanced version of the CV tailored to the job description.
-    Returns the enhanced data. Call /apply-ai-changes to persist it.
+    Use Groq AI to regenerate the three ATS-critical sections of the CV
+    (experiences, projects, skills) based on the job description.
+    Personal info, certifications, languages and interests are NOT changed.
+
+    Returns the enhanced CV data — call /apply-ai-changes to persist.
     """
     cv = db.query(CV).filter(CV.id == cv_id, CV.user_id == current_user.id).first()
     if not cv:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
 
     cv_data = _build_cv_data_dict(cv)
-    result = enhance_cv_for_job(cv_data, request.job_description)
 
+    # Use the same Groq client/model pattern as cover letter generation
+    result = groq_enhance_sections(cv_data, request.job_description)
+
+    success = result.get('status') == 'success'
     return {
         "status": result.get('status', 'error'),
         "enhanced_cv": result.get('enhanced_cv', cv_data),
-        "message": "AI enhancement complete. Call /apply-ai-changes to save." if result.get('status') == 'success'
-                   else "AI unavailable — returning original CV data.",
+        "message": (
+            "AI enhancement complete. Call /apply-ai-changes to save."
+            if success else
+            "AI enhancement unavailable — original CV data returned."
+        ),
     }
 
 

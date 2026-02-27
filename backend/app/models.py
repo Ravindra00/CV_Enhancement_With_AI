@@ -42,6 +42,8 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
 
     is_active = Column(Boolean, default=True)
+    is_superuser = Column(Boolean, default=False)   # Admin: can manage all users
+    ai_access = Column(Boolean, default=True)        # Controls access to AI features
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -79,6 +81,8 @@ class CV(Base):
     languages = Column(JSONB)
     certifications = Column(JSONB)
     interests = Column(JSONB)
+    custom_sections = Column(JSONB)   # [{title, content}]
+    theme = Column(JSONB)             # {primaryColor, fontFamily, layout, accentStyle}
 
     # AI-ready metadata
     embedding = Column(JSONB, nullable=True)  # can replace with pgvector later

@@ -41,7 +41,32 @@ def run_migrations() -> None:
     try:
         with engine.begin() as conn:  # begin() handles commit/rollback automatically
             # CV table migrations
-            for col_name in ["personal_info", "interests", "embedding"]:
+            for col_name in ["personal_info", "interests", "embedding", "custom_sections", "theme"]:
+                try:
+                    added = _add_column_if_missing(conn, "cvs", col_name)
+                    if added:
+                        logger.info(f"Migration: added column cvs.{col_name}")
+                except Exception as e:
+                    logger.warning(f"Migration for cvs.{col_name} failed: {e}")
+
+            # Users table: superuser + AI access control
+            for col_name, col_type, default in [
+                ("is_superuser", "BOOLEAN", "FALSE"),
+                ("ai_access",    "BOOLEAN", "TRUE"),
+            ]:
+                try:
+                    check_sql = text("""
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'users' AND column_name = :col
+                    """)
+                    if not conn.execute(check_sql, {"col": col_name}).fetchone():
+                        conn.execute(text(
+                            f"ALTER TABLE users ADD COLUMN {col_name} BOOLEAN NOT NULL DEFAULT {default}"
+                        ))
+                        logger.info(f"Migration: added users.{col_name}")
+                except Exception as e:
+                    logger.warning(f"Migration for users.{col_name} failed: {e}")
+
                 try:
                     added = _add_column_if_missing(conn, "cvs", col_name)
                     if added:

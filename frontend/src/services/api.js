@@ -69,7 +69,11 @@ export const cvAPI = {
 
   analyze: (cvId) => apiClient.post(`/cvs/${cvId}/analyze`),
 
-  enhanceForJob: (cvId, jobDescription) => apiClient.post(`/cvs/${cvId}/enhance-for-job`, { job_description: jobDescription }),
+  enhanceForJob: (cvId, jobDescription) =>
+    apiClient.post(`/cvs/${cvId}/enhance-for-job`, { job_description: jobDescription }),
+
+  applyAIChanges: (cvId, enhancedCv) =>
+    apiClient.post(`/cvs/${cvId}/apply-ai-changes`, { enhanced_cv: enhancedCv }),
 };
 
 // ── AI Customize ──────────────────────────────────────────────────────────────
@@ -111,6 +115,14 @@ export const jobApplicationAPI = {
   updateStatus: (id, status) => apiClient.patch(`/job-applications/${id}/status`, null, { params: { new_status: status } }),
   delete: (id) => apiClient.delete(`/job-applications/${id}`),
   getStats: () => apiClient.get('/job-applications/stats'),
+};
+
+// ── Admin (Superuser) ─────────────────────────────────────────────────────────
+export const adminAPI = {
+  getStats: () => apiClient.get('/admin/stats'),
+  getUsers: () => apiClient.get('/admin/users'),
+  updateUser: (id, data) => apiClient.patch(`/admin/users/${id}`, data),
+  deleteUser: (id) => apiClient.delete(`/admin/users/${id}`),
 };
 
 export default apiClient;

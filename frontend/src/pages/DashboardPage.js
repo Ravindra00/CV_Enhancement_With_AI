@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCVStore } from '../store/cvStore';
 import { cvAPI } from '../services/api';
 import CVUploadModal from '../components/CVUploadModal';
+import CVPreview from '../components/CVPreview';
 
 /* ── tiny helper ── */
 const timeAgo = (dateStr) => {
@@ -14,6 +15,25 @@ const timeAgo = (dateStr) => {
   return new Date(dateStr).toLocaleDateString();
 };
 
+/* ── Styled delete confirm dialog ── */
+const DeleteConfirm = ({ title, onConfirm, onCancel }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdropBlur" onClick={onCancel}>
+    <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-xs w-full mx-4" onClick={e => e.stopPropagation()}>
+      <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-3">
+        <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+      </div>
+      <h3 className="text-base font-bold text-gray-900 text-center mb-1">Delete Resume?</h3>
+      <p className="text-sm text-gray-500 text-center mb-5">"<span className="font-medium text-gray-700">{title}</span>" will be permanently deleted. This cannot be undone.</p>
+      <div className="flex gap-3">
+        <button onClick={onCancel} className="flex-1 py-2.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 transition">Cancel</button>
+        <button onClick={onConfirm} className="flex-1 py-2.5 text-sm font-semibold text-white bg-red-600 rounded-xl hover:bg-red-700 transition">Delete</button>
+      </div>
+    </div>
+  </div>
+);
+
 const DashboardPage = () => {
   const { cvs, setCVs, loading, setLoading, error, setError } = useCVStore();
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -21,6 +41,7 @@ const DashboardPage = () => {
   const [newTitle, setNewTitle] = useState('');
   const [creating, setCreating] = useState(false);
   const [toast, setToast] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null); // { id, title }
   const navigate = useNavigate();
 
   useEffect(() => { fetchCVs(); }, []);
@@ -73,14 +94,29 @@ const DashboardPage = () => {
   };
 
   const handleDelete = async (id, e) => {
-    e.stopPropagation();
-    if (!window.confirm('Delete this CV?')) return;
+    if (e) e.stopPropagation();
+    const cv = cvs.find(c => c.id === id);
+    setConfirmDelete({ id, title: cv?.title || 'Untitled CV' });
+  };
+
+  const confirmDeleteNow = async () => {
+    if (!confirmDelete) return;
+    const { id } = confirmDelete;
+    setConfirmDelete(null);
     try { await cvAPI.delete(id); await fetchCVs(); showToast('CV deleted'); }
     catch { showToast('Delete failed', 'error'); }
   };
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Delete confirm dialog */}
+      {confirmDelete && (
+        <DeleteConfirm
+          title={confirmDelete.title}
+          onConfirm={confirmDeleteNow}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
       {/* Toast */}
       {toast && (
         <div className={`fixed top-16 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white toast ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}>
@@ -139,67 +175,62 @@ const DashboardPage = () => {
               <div
                 key={cv.id}
                 onClick={() => navigate(`/cv-editor/${cv.id}`)}
-                className="bg-white rounded-xl border border-gray-200 overflow-hidden cursor-pointer hover:shadow-card-hover hover:border-primary-200 transition group"
+                className="bg-white rounded-xl border border-gray-200 overflow-hidden cursor-pointer hover:shadow-lg hover:border-primary-200 transition-all duration-200 group"
               >
-                {/* Thumbnail preview mimicking A4 */}
-                <div className="h-44 bg-gradient-to-b from-gray-50 to-white flex items-start justify-center pt-4 px-3 overflow-hidden relative">
-                  <div className="w-full bg-white shadow rounded text-[4.5px] leading-[7px] p-2 font-sans scale-100 origin-top pointer-events-none select-none border border-gray-100">
-                    {/* Mini preview */}
-                    <div className="bg-primary h-3 -mx-2 -mt-2 mb-1.5 flex items-center px-2">
-                      <span className="text-white font-bold text-[5px] truncate">{cv.personal_info?.name || cv.title}</span>
-                    </div>
-                    {cv.personal_info?.email && <div className="text-gray-400 truncate">{cv.personal_info.email}</div>}
-                    {cv.personal_info?.summary && <div className="text-gray-600 mt-1 line-clamp-2">{cv.personal_info.summary}</div>}
-                    {(cv.experiences?.length > 0) && (
-                      <div className="mt-1.5 border-t border-gray-200 pt-1">
-                        <div className="font-semibold text-gray-700 mb-0.5">Experience</div>
-                        {cv.experiences.slice(0, 2).map((exp, i) => (
-                          <div key={i} className="text-gray-500 truncate">• {exp.position} at {exp.company}</div>
-                        ))}
-                      </div>
-                    )}
-                    {(cv.skills?.length > 0) && (
-                      <div className="mt-1.5 border-t border-gray-200 pt-1">
-                        <div className="font-semibold text-gray-700 mb-0.5">Skills</div>
-                        <div className="text-gray-500 truncate">{cv.skills.slice(0, 6).map(s => s.name || s).join(' · ')}</div>
-                      </div>
-                    )}
+                {/* Full CV preview thumbnail — correctly scaled */}
+                <div className="relative bg-gray-50 overflow-hidden" style={{ height: 200 }}>
+                  {/* 
+                    CVPreview renders at exactly 794px wide.
+                    We want it to fill a card that is ~100% of available width.
+                    We use a fixed inner width and CSS scale so the preview fills the card.
+                    transformOrigin top-left, then set the outer wrapper height to (794 * scale)-equivalent.
+                  */}
+                  <div style={{
+                    position: 'absolute',
+                    top: 0, left: 0,
+                    width: 794,
+                    transform: 'scale(var(--cv-scale, 0.24))',
+                    transformOrigin: 'top left',
+                    pointerEvents: 'none',
+                    userSelect: 'none',
+                    '--cv-scale': '0.24',
+                  }}>
+                    <CVPreview data={cv} theme={cv.theme} />
                   </div>
-                  {/* Overlay actions on hover */}
-                  <div className="absolute inset-0 bg-primary/5 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
+                  {/* Overlay gradient at bottom for fade effect */}
+                  <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 56, background: 'linear-gradient(to bottom, transparent, rgba(249,250,251,0.95))' }} />
+                  {/* Hover overlay with action buttons */}
+                  <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-all duration-200 flex flex-col items-center justify-center gap-2 p-3">
+                    <div className="flex gap-2 flex-wrap justify-center">
+                      <button
+                        onClick={e => { e.stopPropagation(); navigate(`/cv-editor/${cv.id}`); }}
+                        className="bg-white text-gray-800 text-xs font-semibold px-4 py-2 rounded-lg shadow-sm hover:bg-primary hover:text-white transition min-w-[72px]"
+                      >✏️ Edit</button>
+                      <button
+                        onClick={e => { e.stopPropagation(); navigate(`/cv-customize/${cv.id}`); }}
+                        className="bg-primary text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-sm hover:bg-primary-700 transition min-w-[72px]"
+                      >⚡ AI</button>
+                      <button
+                        onClick={e => { e.stopPropagation(); navigate(`/cover-letter/new?cvId=${cv.id}`); }}
+                        className="bg-blue-600 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-sm hover:bg-blue-700 transition min-w-[72px]"
+                      >✉ Letter</button>
+                    </div>
                     <button
-                      onClick={e => { e.stopPropagation(); navigate(`/cv-editor/${cv.id}`); }}
-                      className="bg-white shadow text-xs font-medium text-gray-700 px-3 py-1.5 rounded-lg hover:bg-primary hover:text-white transition"
+                      onClick={e => { e.stopPropagation(); handleDelete(cv.id, e); }}
+                      className="bg-red-600 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-sm hover:bg-red-700 transition w-full max-w-[220px] flex items-center justify-center gap-1.5"
                     >
-                      Edit
-                    </button>
-                    <button
-                      onClick={e => { e.stopPropagation(); navigate(`/cover-letter/new?cvId=${cv.id}`); }}
-                      className="bg-blue-600 shadow text-xs font-medium text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition"
-                    >
-                      Generate Letter
-                    </button>
-                    <button
-                      onClick={e => { e.stopPropagation(); navigate(`/cv-customize/${cv.id}`); }}
-                      className="bg-primary shadow text-xs font-medium text-white px-3 py-1.5 rounded-lg hover:bg-primary-700 transition"
-                    >
-                      AI Enhance
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      Delete
                     </button>
                   </div>
                 </div>
 
                 {/* Card footer */}
-                <div className="px-3 py-2.5 border-t border-gray-100 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold text-gray-800 truncate max-w-[120px]">{cv.title || 'Untitled CV'}</p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">{timeAgo(cv.updated_at)} · A4</p>
+                <div className="px-3 py-2.5 border-t border-gray-100 flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-gray-800 truncate">{cv.title || 'Untitled CV'}</p>
+                    <p className="text-xs font-medium text-gray-500 mt-0.5">{timeAgo(cv.updated_at)} · A4</p>
                   </div>
-                  <button
-                    onClick={e => handleDelete(cv.id, e)}
-                    className="w-6 h-6 rounded-md flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 transition"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                  </button>
                 </div>
               </div>
             ))}
