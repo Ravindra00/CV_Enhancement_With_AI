@@ -673,7 +673,8 @@ def enhance_cv_for_job_endpoint(
         "enhanced_cv": result.get('enhanced_cv', cv_data),
         "message": (
             "AI enhancement complete. Call /apply-ai-changes to save."
-            if success else
+            if success 
+            else
             "AI enhancement unavailable — original CV data returned."
         ),
     }

@@ -12,6 +12,9 @@ from app.config import CORS_ORIGINS, API_TITLE, API_VERSION, API_DESCRIPTION
 from app.database import Base, engine
 from app.routes import auth, cvs, cover_letters, job_applications, admin
 
+#app.include_router(auth.router)
+
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

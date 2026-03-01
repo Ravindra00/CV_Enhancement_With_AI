@@ -362,7 +362,7 @@ def generate_cv_pdf(
                     story.append(Paragraph(f'<font color="#6b7280">Note: {edu["grade"]}</font>', sub_style))
                 story.append(Spacer(1, 4))
 
-        if skills:
+        if raw_skills:
             section_header(labels['skills'])
             cats = skills_as_categories(cv_data.get('skills') or [])
             if cats:
