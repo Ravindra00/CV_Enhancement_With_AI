@@ -29,6 +29,36 @@ class UserResponse(UserBase):
     is_active: bool
     is_superuser: bool = False
     ai_access: bool = True
+    last_login: Optional[datetime] = None
+    failed_login_attempts: int = 0
+    locked_until: Optional[datetime] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AdminCreateUserRequest(BaseModel):
+    """Schema for admin creating a new user directly."""
+    name: str = Field(..., min_length=1, max_length=255)
+    email: EmailStr
+    password: str = Field(..., min_length=6)
+    is_superuser: bool = False
+    ai_access: bool = True
+
+
+class AuditLogResponse(BaseModel):
+    id: int
+    admin_id: int
+    admin_name: Optional[str] = None  # joined from User
+    action: str
+    entity_type: str
+    entity_id: Optional[str] = None
+    old_values: Optional[Dict[str, Any]] = None
+    new_values: Optional[Dict[str, Any]] = None
+    ip_address: Optional[str] = None
+    status: str
+    notes: Optional[str] = None
     created_at: datetime
 
     class Config:

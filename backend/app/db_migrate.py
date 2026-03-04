@@ -116,6 +116,54 @@ def run_migrations() -> None:
                             logger.info("Migration: copied data from suggestions.suggestion to suggestion_text")
             except Exception as e:
                 logger.warning(f"Migration for suggestions.suggestion_text failed: {e}")
+
+            # Users table: lockout + last-login tracking
+            for col_name, col_type in [
+                ("last_login",            "TIMESTAMP"),
+                ("locked_until",          "TIMESTAMP"),
+                ("failed_login_attempts", "INTEGER NOT NULL DEFAULT 0"),
+            ]:
+                try:
+                    check_sql = text("""
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'users' AND column_name = :col
+                    """)
+                    if not conn.execute(check_sql, {"col": col_name}).fetchone():
+                        conn.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}"))
+                        logger.info(f"Migration: added users.{col_name}")
+                except Exception as e:
+                    logger.warning(f"Migration for users.{col_name} failed: {e}")
+
+            # Audit log table (create if missing)
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS audit_logs (
+                        id           SERIAL PRIMARY KEY,
+                        admin_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        action       VARCHAR(100) NOT NULL,
+                        entity_type  VARCHAR(50)  NOT NULL,
+                        entity_id    VARCHAR(50),
+                        old_values   JSONB,
+                        new_values   JSONB,
+                        ip_address   VARCHAR(50),
+                        status       VARCHAR(20) DEFAULT 'success',
+                        notes        TEXT,
+                        created_at   TIMESTAMP DEFAULT NOW()
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_audit_admin_time ON audit_logs (admin_id, created_at);
+                    CREATE INDEX IF NOT EXISTS idx_audit_entity     ON audit_logs (entity_type, entity_id);
+                """))
+                logger.info("Migration: audit_logs table ensured")
+            except Exception as e:
+                logger.warning(f"Migration for audit_logs table failed: {e}")
+
+            # Suggestions table: suggestion_data column
+            try:
+                added = _add_column_if_missing(conn, "suggestions", "suggestion_data", "JSONB")
+                if added:
+                    logger.info("Migration: added suggestions.suggestion_data")
+            except Exception as e:
+                logger.warning(f"Migration for suggestions.suggestion_data failed: {e}")
                 
     except Exception as e:
         logger.error(f"Database migration failed: {e}")

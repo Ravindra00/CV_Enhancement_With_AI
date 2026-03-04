@@ -5,7 +5,7 @@ from typing import List
 from app.database import get_db
 from app.models import User, CV, Suggestion, CVCustomization
 from app.schemas import CVResponse, CVCreate, CVUpdate, CVCustomizationRequest, SuggestionResponse, ApplyAIChangesRequest
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, require_ai_access
 from app.utils.cv_parser import parse_cv_file
 from app.utils.ai_integration import analyze_cv, enhance_cv_for_job, groq_enhance_sections
 from app.utils.ai_enhance import extract_keywords, compute_match_score, rule_based_suggestions, groq_suggestions
@@ -503,6 +503,39 @@ def upload_photo(
     return {"photo_path": photo_url}
 
 
+@router.delete("/{cv_id}/photo")
+def remove_photo(
+    cv_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Remove the profile photo from a CV — clears DB record and deletes the file."""
+    cv = db.query(CV).filter(CV.id == cv_id, CV.user_id == current_user.id).first()
+    if not cv:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
+
+    # Delete the file from disk
+    photo_url = cv.photo_path or ""
+    if photo_url:
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        file_path = os.path.join(backend_dir, photo_url.lstrip("/"))
+        if os.path.isfile(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass  # File already gone — that's fine
+
+    # Clear from DB
+    cv.photo_path = None
+    pi = _get_personal_info(cv)
+    pi.pop("photo", None)
+    cv.personal_info = pi
+    cv.updated_at = datetime.utcnow()
+    db.commit()
+    return {"message": "Photo removed successfully"}
+
+
+
 @router.get("/{cv_id}/export/pdf")
 def export_cv_pdf(
     cv_id: int,
@@ -555,7 +588,7 @@ def export_cv_pdf(
 @router.post("/{cv_id}/analyze")
 def analyze_cv_endpoint(
     cv_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_ai_access),
     db: Session = Depends(get_db)
 ):
     """Analyze CV with Groq and return strengths, improvements, score."""
@@ -572,7 +605,7 @@ def analyze_cv_endpoint(
 def customize_cv(
     cv_id: int,
     request: CVCustomizationRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_ai_access),
     db: Session = Depends(get_db)
 ):
     """

@@ -45,6 +45,10 @@ class User(Base):
     is_superuser = Column(Boolean, default=False)   # Admin: can manage all users
     ai_access = Column(Boolean, default=True)        # Controls access to AI features
 
+    last_login = Column(DateTime, nullable=True)
+    failed_login_attempts = Column(Integer, default=0, nullable=False)
+    locked_until = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -242,3 +246,31 @@ class JobApplication(Base):
     user = relationship("User", back_populates="job_applications")
     cv = relationship("CV", back_populates="job_applications")
     cover_letter = relationship("CoverLetter", back_populates="job_applications")
+
+
+# ───────────────────────────────────────────────────────────────
+# AUDIT LOG
+# ───────────────────────────────────────────────────────────────
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True)
+    admin_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    action = Column(String(100), nullable=False)           # e.g. "user_created", "user_deleted"
+    entity_type = Column(String(50), nullable=False)       # e.g. "User", "CV"
+    entity_id = Column(String(50), nullable=True)          # e.g. "42"
+    old_values = Column(JSONB, nullable=True)
+    new_values = Column(JSONB, nullable=True)
+    ip_address = Column(String(50), nullable=True)
+    status = Column(String(20), default="success")         # "success" | "failed"
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    admin = relationship("User", foreign_keys=[admin_id])
+
+    __table_args__ = (
+        Index("idx_audit_admin_time", "admin_id", "created_at"),
+        Index("idx_audit_entity", "entity_type", "entity_id"),
+    )

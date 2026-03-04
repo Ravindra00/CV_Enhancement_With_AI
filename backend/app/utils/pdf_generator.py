@@ -189,12 +189,21 @@ def generate_cv_pdf(
         if os.path.isfile(candidate):
             photo_abs = candidate
 
+    _photo_tmp_path = [None]  # list so inner functions can write to it
+
     def _make_photo_image(size_pts=72):
-        """Return an RLImage for the profile photo with EXIF auto-rotation, or None."""
+        """
+        Return an RLImage for the profile photo, or None.
+
+        KEY FIX vs original:
+          - Downscales image to 2x the display size BEFORE saving.
+            Embedding a 12MP photo at full res was the main cause of 40MB PDFs.
+          - Saves as JPEG quality=80 instead of uncompressed PNG.
+          - Temp file is cleaned up after doc.build().
+        """
         if not photo_abs:
             return None
         try:
-            # Use Pillow to auto-correct EXIF orientation
             from PIL import Image as PILImage, ExifTags
             import tempfile
 
@@ -212,21 +221,31 @@ def generate_cv_pdf(
                                 pil_img = pil_img.rotate(rotations[value], expand=True)
                             break
             except (AttributeError, Exception):
-                pass  # No EXIF or not a JPEG — just use as-is
+                pass  # No EXIF or not a JPEG
 
-            # Convert to RGB (handles RGBA PNGs etc.)
-            if pil_img.mode not in ('RGB', 'L'):
+            # Convert to RGB (handles RGBA, palette, grayscale, CMYK)
+            if pil_img.mode != 'RGB':
                 pil_img = pil_img.convert('RGB')
 
-            # Save to a temp PNG so ReportLab can render it cleanly
-            tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-            pil_img.save(tmp.name, 'PNG')
-            tmp.close()
+            # ── KEY FIX: crop to square then downscale to display size ──
+            # Use 2x the point size for HiDPI sharpness (e.g. 144 px for 72pt)
+            target_px = int(size_pts * 2)
+            w, h = pil_img.size
+            side = min(w, h)
+            left = (w - side) // 2
+            top  = (h - side) // 2
+            pil_img = pil_img.crop((left, top, left + side, top + side))
+            pil_img = pil_img.resize((target_px, target_px), PILImage.LANCZOS)
 
-            img = RLImage(tmp.name, width=size_pts, height=size_pts)
-            return img
+            # Save as JPEG (compressed) — NOT PNG (uncompressed, huge)
+            tmp = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
+            pil_img.save(tmp.name, 'JPEG', quality=80, optimize=True)
+            tmp.close()
+            _photo_tmp_path[0] = tmp.name  # remember for cleanup
+
+            return RLImage(tmp.name, width=size_pts, height=size_pts)
         except ImportError:
-            # Pillow not installed — fall back to simple RLImage (no EXIF fix)
+            # Pillow not installed — fall back to direct embed (no resize)
             try:
                 return RLImage(photo_abs, width=size_pts, height=size_pts)
             except Exception:
@@ -610,4 +629,13 @@ def generate_cv_pdf(
                 story.append(Paragraph(cs_content, body_style))
 
     doc.build(story)
+
+    # Clean up temp photo file now that it's been embedded
+    if _photo_tmp_path[0]:
+        try:
+            import os as _os
+            _os.unlink(_photo_tmp_path[0])
+        except Exception:
+            pass
+
     return buffer.getvalue()
