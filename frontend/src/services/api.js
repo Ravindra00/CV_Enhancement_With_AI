@@ -2,7 +2,7 @@ import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
-const API_TIMEOUT = process.env.REACT_APP_API_TIMEOUT || 30000;
+const API_TIMEOUT = parseInt(process.env.REACT_APP_API_TIMEOUT || '30000', 10);
 
 export const apiClient = axios.create({
   baseURL: API_URL,
@@ -53,6 +53,8 @@ export const cvAPI = {
     fd.append('file', file);
     return apiClient.post(`/cvs/${cvId}/photo`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
   },
+
+  removePhoto: (cvId) => apiClient.delete(`/cvs/${cvId}/photo`),
 
   exportPDF: async (cvId, title = 'CV') => {
     const token = useAuthStore.getState().token;
@@ -120,9 +122,14 @@ export const jobApplicationAPI = {
 // ── Admin (Superuser) ─────────────────────────────────────────────────────────
 export const adminAPI = {
   getStats: () => apiClient.get('/admin/stats'),
-  getUsers: () => apiClient.get('/admin/users'),
+  getUsers: (params) => apiClient.get('/admin/users', { params }),
+  getUser: (id) => apiClient.get(`/admin/users/${id}`),
+  createUser: (data) => apiClient.post('/admin/users', data),
   updateUser: (id, data) => apiClient.patch(`/admin/users/${id}`, data),
   deleteUser: (id) => apiClient.delete(`/admin/users/${id}`),
+  unlockUser: (id) => apiClient.post(`/admin/users/${id}/unlock`),
+  resetPassword: (id) => apiClient.post(`/admin/users/${id}/reset-password`),
+  getAuditLogs: (params) => apiClient.get('/admin/audit-logs', { params }),
 };
 
 export default apiClient;

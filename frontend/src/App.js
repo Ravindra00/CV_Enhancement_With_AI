@@ -14,6 +14,7 @@ import CoverLetterViewPage from './pages/CoverLetterViewPage';  // ← Already i
 import CoverLetterEditorPage from './pages/CoverLetterEditorPage';
 import CoverLetterGeneratorPage from './pages/CoverLetterGeneratorPage';
 import JobTrackerPage from './pages/JobTrackerPage';
+import AdminPage from './pages/AdminPage';
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -68,6 +69,9 @@ function App() {
 
           {/* Job Tracker */}
           <Route path="/jobs" element={<ProtectedRoute><JobTrackerPage /></ProtectedRoute>} />
+
+          {/* Admin Panel (superuser only) */}
+          <Route path="/admin" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />
 
           {/* ==================== DEFAULT ROUTES ==================== */}
           <Route path="/" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />} />

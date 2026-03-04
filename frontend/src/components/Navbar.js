@@ -11,6 +11,7 @@ const Navbar = () => {
     { to: '/dashboard', label: 'My CVs', icon: '📄' },
     { to: '/cover-letters', label: 'Cover Letters', icon: '✉️' },
     { to: '/jobs', label: 'Job Tracker', icon: '🎯' },
+    ...(user?.is_superuser ? [{ to: '/admin', label: 'Admin', icon: '⚙️', admin: true }] : []),
   ];
 
   const isActive = (to) => location.pathname === to || location.pathname.startsWith(to + '/');
@@ -34,8 +35,8 @@ const Navbar = () => {
                 key={to}
                 to={to}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition ${isActive(to)
-                    ? 'bg-primary-50 text-primary'
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                  ? 'bg-primary-50 text-primary'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
                   }`}
               >
                 <span className="text-base">{icon}</span>
