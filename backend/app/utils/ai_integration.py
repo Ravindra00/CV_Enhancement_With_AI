@@ -100,6 +100,7 @@ def generate_cover_letter(cv_data: dict, job_description: str, user_name: str = 
     """
     Generate a professional cover letter using Groq API.
     Returns plain text string (not JSON object).
+    Language of the cover letter matches the language of the job description.
     
     Args:
         cv_data: Dictionary containing CV information
@@ -124,6 +125,12 @@ def generate_cover_letter(cv_data: dict, job_description: str, user_name: str = 
         if not model:
             print("⚠️  No working Groq model available, using fallback")
             return _generate_fallback_cover_letter(user_name, job_description)
+        
+        # Detect language from job description
+        from app.utils.language_detect import detect_language, get_language_name
+        language_code = detect_language(job_description)
+        language_name = get_language_name(language_code)
+        print(f"   Language detected: {language_name} ({language_code})")
         
         # Build CV summary
         name = cv_data.get('full_name', user_name)
@@ -163,8 +170,126 @@ def generate_cover_letter(cv_data: dict, job_description: str, user_name: str = 
         
         print(f"   Experience: {experience_text}")
         
-        # Build prompt
-        prompt = f"""You are a professional cover letter writer. 
+        # Language-specific prompts
+        language_prompts = {
+            'de': f"""Du bist ein professioneller Bewerbungsschreiber. 
+
+Schreibe ein professionelles und überzeugendes Anschreiben basierend auf diesen Informationen:
+
+**Kandidateninformationen:**
+- Name: {name}
+- Professionelle Zusammenfassung: {summary}
+- Wichtige Fähigkeiten: {skills_text}
+- Hintergrund: {experience_text}
+
+**Stellenbeschreibung:**
+{job_description}
+
+Schreibe ein professionelles Anschreiben, das:
+1. Mit einem starken Hook beginnt
+2. Relevante Fähigkeiten hervorhebt, die dem Job entsprechen
+3. Begeisterung für die Rolle zeigt
+4. Mit einer Handlungsaufforderung endet
+5. 3-4 Absätze lang ist
+6. Einen professionellen aber persönlichen Ton verwendet
+
+Geben Sie NUR den Anschreiben-Text zurück, keine Kopfzeilen oder Metadaten. Beginnen Sie direkt mit "Sehr geehrte Damen und Herren," oder ähnlich.""",
+            
+            'fr': f"""Vous êtes un rédacteur professionnel de lettres de motivation.
+
+Rédigez une lettre de motivation professionnelle et convaincante basée sur ces informations :
+
+**Informations sur le candidat :**
+- Nom : {name}
+- Résumé professionnel : {summary}
+- Compétences clés : {skills_text}
+- Contexte : {experience_text}
+
+**Description du poste :**
+{job_description}
+
+Rédigez une lettre de motivation professionnelle qui :
+1. Commence par un accroche puissante
+2. Met en évidence les compétences pertinentes qui correspondent au poste
+3. Montre l'enthousiasme pour le rôle
+4. Se termine par un appel à l'action
+5. Fait 3-4 paragraphes
+6. Utilise un ton professionnel mais personnel
+
+Retournez UNIQUEMENT le texte de la lettre, pas d'en-têtes ni de métadonnées. Commencez directement par "Madame, Monsieur," ou similaire.""",
+            
+            'es': f"""Eres un redactor profesional de cartas de presentación.
+
+Redacta una carta de presentación profesional y convincente basada en esta información:
+
+**Información del candidato:**
+- Nombre: {name}
+- Resumen profesional: {summary}
+- Habilidades clave: {skills_text}
+- Antecedentes: {experience_text}
+
+**Descripción del puesto:**
+{job_description}
+
+Redacta una carta de presentación profesional que:
+1. Comience con un gancho fuerte
+2. Destaque habilidades relevantes que coincidan con el trabajo
+3. Muestre entusiasmo por el puesto
+4. Cierre con una llamada a la acción
+5. Tenga 3-4 párrafos
+6. Use un tono profesional pero personalizado
+
+Devuelve SOLO el texto de la carta, sin encabezados ni metadatos. Comienza directamente con "Estimado Señor/Señora," o similar.""",
+            
+            'it': f"""Sei uno scrittore professionale di lettere di presentazione.
+
+Scrivi una lettera di presentazione professionale e convincente basata su queste informazioni:
+
+**Informazioni sul candidato:**
+- Nome: {name}
+- Riepilogo professionale: {summary}
+- Competenze chiave: {skills_text}
+- Background: {experience_text}
+
+**Descrizione del lavoro:**
+{job_description}
+
+Scrivi una lettera di presentazione professionale che:
+1. Inizi con un aggancio forte
+2. Evidenzi competenze rilevanti che corrispondono al lavoro
+3. Mostri entusiasmo per il ruolo
+4. Chiuda con un invito all'azione
+5. Sia lunga 3-4 paragrafi
+6. Usi un tono professionale ma personale
+
+Ritorna SOLO il testo della lettera, nessun intestazione o metadati. Inizia direttamente con "Spett.le Signore," o simile.""",
+            
+            'pt': f"""Você é um escritor profissional de cartas de apresentação.
+
+Escreva uma carta de apresentação profissional e convincente com base nestas informações:
+
+**Informações do candidato:**
+- Nome: {name}
+- Resumo profissional: {summary}
+- Habilidades principais: {skills_text}
+- Antecedentes: {experience_text}
+
+**Descrição do trabalho:**
+{job_description}
+
+Escreva uma carta de apresentação profissional que:
+1. Comece com um gancho forte
+2. Destaque habilidades relevantes que correspondem ao trabalho
+3. Mostre entusiasmo pelo cargo
+4. Termine com um apelo à ação
+5. Tenha 3-4 parágrafos
+6. Use um tom profissional mas personalizado
+
+Retorne APENAS o texto da carta, sem cabeçalhos ou metadados. Comece diretamente com "Prezado Senhor/Senhora," ou similar.""",
+        }
+        
+        # Use language-specific prompt if available, otherwise English
+        prompt = language_prompts.get(language_code, f"""You are a professional cover letter writer. 
 
 Generate a professional, compelling cover letter based on this information:
 
@@ -185,7 +310,7 @@ Write a professional cover letter that:
 5. Is 3-4 paragraphs long
 6. Uses professional but personable tone
 
-Return ONLY the cover letter text, no headers or metadata. Start directly with "Dear Hiring Manager," or similar."""
+Return ONLY the cover letter text, no headers or metadata. Start directly with "Dear Hiring Manager," or similar.""")
 
         print(f"\n📤 Sending to Groq API...")
         print(f"   Model: {model}")

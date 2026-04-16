@@ -25,7 +25,7 @@ function useDebounce(value, delay) {
 }
 
 // ─── Skills tag input ─────────────────────────────────────────────────────────
-const SkillsInput = ({ skills, onChange }) => {
+const SkillsInput = ({ skills, onChange, onSuggestSkills, suggestedSkills, onAddSuggested, suggestingSkills }) => {
   const [input, setInput] = useState('');
   const add = () => {
     const s = input.trim();
@@ -41,7 +41,23 @@ const SkillsInput = ({ skills, onChange }) => {
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
         <button onClick={add} className="px-3 py-2 bg-primary text-white rounded-lg text-sm font-semibold hover:bg-primary-700 transition">+</button>
+        <button onClick={onSuggestSkills} disabled={suggestingSkills} className="px-3 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-lg text-sm font-semibold transition flex items-center gap-1">
+          {suggestingSkills ? <><svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>...</> : <>✦ Suggest from JD</>}
+        </button>
       </div>
+      {suggestedSkills && suggestedSkills.length > 0 && (
+        <div className="mb-3 p-3 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg">
+          <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 mb-2">💡 Suggested Skills (click to add):</p>
+          <div className="flex flex-wrap gap-1.5">
+            {suggestedSkills.map((skill, i) => (
+              <button key={i} onClick={() => onAddSuggested(skill)}
+                className="text-xs bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600 px-2.5 py-1 rounded-full hover:bg-amber-200 dark:hover:bg-amber-800 transition cursor-pointer">
+                + {skill}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="flex flex-wrap gap-1.5">
         {skills.map((s, i) => {
           const name = typeof s === 'string' ? s : s.name;
@@ -158,6 +174,9 @@ const CVCustomizePage = () => {
   const [summaryGenerating, setSummaryGenerating] = useState(false);
   // AI Feature 3 — Bullet improver {[expIndex]: { originals, suggestions, accepted: Set<number>, loading }}
   const [bulletState, setBulletState] = useState({});
+  // AI Feature 4 — Skill suggester
+  const [suggestedSkills, setSuggestedSkills] = useState([]);
+  const [suggestingSkills, setSuggestingSkills] = useState(false);
 
   // ── helpers ───────────────────────────────────────────────────────────────
   const showToast = (msg, type = 'success') => {
@@ -353,7 +372,8 @@ const CVCustomizePage = () => {
     if (!canUseAI) return;
     setSummaryGenerating(true);
     try {
-      const res = await cvAPI.generateSummary(cvId);
+      const jd = jobDescription || atsJD || '';
+      const res = await cvAPI.generateSummary(cvId, jd);
       if (res.data?.summary) {
         updatePI('summary', res.data.summary);
         showToast('✨ Summary written by AI!');
@@ -361,7 +381,7 @@ const CVCustomizePage = () => {
     } catch (err) {
       showToast(err.response?.data?.detail || 'Summary generation failed', 'error');
     } finally { setSummaryGenerating(false); }
-  }, [cvId, canUseAI]); // eslint-disable-line
+  }, [cvId, canUseAI, jobDescription, atsJD]); // eslint-disable-line
 
   // ── AI: Feature 3 — Improve Bullets ───────────────────────────────────────────────
   const handleImproveBullets = useCallback(async (expIdx) => {
@@ -407,6 +427,32 @@ const CVCustomizePage = () => {
     updateExp(expIdx, 'description', newDesc);
     setBulletState(prev => { const n = { ...prev }; delete n[expIdx]; return n; });
     showToast('✅ Bullets applied!');
+  };
+
+  // ── AI: Feature 4 — Suggest Skills from JD ────────────────────────────────
+  const handleSuggestSkills = useCallback(async () => {
+    if (!canUseAI) return;
+    if (!jobDescription.trim()) { showToast('Enter a job description first', 'error'); return; }
+    setSuggestingSkills(true);
+    try {
+      const currentSkillNames = (cvData.skills || []).map(s => typeof s === 'string' ? s : s.name);
+      const res = await cvAPI.suggestSkills(cvId, jobDescription, currentSkillNames);
+      setSuggestedSkills(res.data?.suggested_skills || []);
+      if (res.data?.suggested_skills?.length === 0) {
+        showToast('No new skills to suggest', 'info');
+      }
+    } catch (err) {
+      showToast(err.response?.data?.detail || 'Skill suggestion failed', 'error');
+      setSuggestedSkills([]);
+    } finally { setSuggestingSkills(false); }
+  }, [cvId, jobDescription, cvData.skills, canUseAI]); // eslint-disable-line
+
+  const handleAddSuggestedSkill = (skill) => {
+    const currentNames = (cvData.skills || []).map(s => typeof s === 'string' ? s : s.name);
+    if (!currentNames.includes(skill)) {
+      setSection('skills', [...(cvData.skills || []), { name: skill, level: '', category: '' }]);
+      showToast(`✅ Added "${skill}" to skills`);
+    }
   };
 
   // Cover letter generation (client-side)
@@ -667,7 +713,7 @@ const CVCustomizePage = () => {
 
     if (key === 'skills') return (
       <Accordion key="skills" icon="⚡" label="Skills" badge={(cvData.skills || []).length} warn={isWeak}>
-        <div className="mt-2"><SkillsInput skills={cvData.skills || []} onChange={v => setSection('skills', v)} /></div>
+        <div className="mt-2"><SkillsInput skills={cvData.skills || []} onChange={v => setSection('skills', v)} onSuggestSkills={handleSuggestSkills} suggestedSkills={suggestedSkills} onAddSuggested={handleAddSuggestedSkill} suggestingSkills={suggestingSkills} /></div>
       </Accordion>
     );
 

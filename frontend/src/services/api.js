@@ -77,11 +77,14 @@ export const cvAPI = {
   applyAIChanges: (cvId, enhancedCv) =>
     apiClient.post(`/cvs/${cvId}/apply-ai-changes`, { enhanced_cv: enhancedCv }),
 
-  generateSummary: (cvId) =>
-    apiClient.post(`/cvs/${cvId}/generate-summary`),
+  generateSummary: (cvId, jobDescription = '') =>
+    apiClient.post(`/cvs/${cvId}/generate-summary`, { job_description: jobDescription }),
 
   improveBullets: (cvId, data) =>
     apiClient.post(`/cvs/${cvId}/improve-bullets`, data),
+
+  suggestSkills: (cvId, jobDescription, currentSkills) =>
+    apiClient.post(`/cvs/${cvId}/suggest-skills`, { job_description: jobDescription, current_skills: currentSkills }),
 };
 
 // ── AI Customize ──────────────────────────────────────────────────────────────

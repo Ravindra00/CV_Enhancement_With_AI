@@ -106,6 +106,50 @@ function extractKeywords(jd) {
   return keywords;
 }
 
+// ─── NEW: calculateATS — comprehensive ATS scoring ─────────────────────────────
+function calculateATS(cvText, jdText) {
+  const normalize = t =>
+    t.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/)
+      .filter(w => w.length > 3);
+
+  const jdWords   = [...new Set(normalize(jdText))];
+  const cvWords   = new Set(normalize(cvText));
+
+  // 1. Keyword match (40pts)
+  const matched   = jdWords.filter(w => cvWords.has(w));
+  const missing   = jdWords.filter(w => !cvWords.has(w));
+  const kwScore   = Math.round((matched.length / jdWords.length) * 40);
+
+  // 2. Required skills coverage (25pts)
+  const skillKw   = ["sql","python","javascript","react","node","aws",
+    "docker","kubernetes","agile","scrum","rest","api","git","linux",
+    "typescript","mongodb","postgresql","excel","powerbi","tableau"];
+  const jdSkills  = skillKw.filter(s => jdText.toLowerCase().includes(s));
+  const cvSkills  = skillKw.filter(s => cvText.toLowerCase().includes(s));
+  const skillHits = jdSkills.filter(s => cvSkills.includes(s));
+  const skScore   = jdSkills.length
+    ? Math.round((skillHits.length / jdSkills.length) * 25) : 25;
+
+  // 3. Section completeness (20pts)
+  const sections  = ["summary","experience","education","skills"];
+  const secScore  = sections.filter(s =>
+    cvText.toLowerCase().includes(s)).length * 5;
+
+  // 4. Formatting safety (15pts)
+  const fmtScore  = 15; // deduct in ATS-Safe template check elsewhere
+
+  const total     = Math.min(kwScore + skScore + secScore + fmtScore, 100);
+
+  return {
+    score: total,
+    matched,
+    missing: missing.slice(0, 20),
+    suggestions: missing.slice(0, 5).map(w =>
+      `Add "${w}" — found ${
+        jdText.split(new RegExp(w, 'gi')).length - 1}x in job description`)
+  };
+}
+
 // ─── Score: keyword match rate (40 pts) ──────────────────────────────────────
 function scoreKeywords(resumeText, jdKeywords) {
   if (jdKeywords.size === 0) return { score: 40, matched: [], missing: [] };

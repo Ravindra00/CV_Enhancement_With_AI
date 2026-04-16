@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
+from pydantic import BaseModel
 from app.database import get_db
 from app.models import User, CV, Suggestion, CVCustomization
 from app.schemas import CVResponse, CVCreate, CVUpdate, CVCustomizationRequest, SuggestionResponse, ApplyAIChangesRequest
@@ -1087,14 +1088,19 @@ def apply_suggestion(
 # AI: Generate Professional Summary (Feature 2)
 # ────────────────────────────────────────────────────────────────────────────────────
 
+class GenerateSummaryRequest(BaseModel):
+    job_description: str = ''
+
 @router.post("/{cv_id}/generate-summary")
 def generate_summary(
     cv_id: int,
+    request: GenerateSummaryRequest = GenerateSummaryRequest(),
     current_user: User = Depends(require_ai_access),
     db: Session = Depends(get_db)
 ):
-    """Use Groq AI to write a professional CV summary for the user."""
+    """Use Groq AI to write a professional CV summary for the user, tailored to job description."""
     from app.utils.ai_integration import _get_working_model, client as groq_client
+    import re as _re
 
     cv = db.query(CV).filter(CV.id == cv_id, CV.user_id == current_user.id).first()
     if not cv:
@@ -1134,11 +1140,18 @@ def generate_summary(
     if not model:
         raise HTTPException(status_code=503, detail="No working AI model available")
 
-    system_prompt = (
-        "Write professional CV summaries. Output ONLY the summary. "
-        "No labels, no preamble, no markdown. 3-4 sentences, first person, active voice. "
-        "Banned words: passionate, dynamic, leverage, results-driven, team player, detail-oriented."
-    )
+    # Detect language from job description using robust detection
+    from app.utils.language_detect import detect_language, get_language_name
+    job_desc = request.job_description or ''
+    language_code = detect_language(job_desc)
+    language_name = get_language_name(language_code)
+    print(f"[GENERATE SUMMARY] Detected language: {language_name} ({language_code})")
+
+    system_prompt = f"""Write professional CV summaries in {language_name}. Output ONLY the summary. 
+No labels, no preamble, no markdown. 3-4 sentences, first person, active voice. 
+Banned words: passionate, dynamic, leverage, results-driven, team player, detail-oriented.
+Match the tone and terminology of the job description provided."""
+
     user_prompt = (
         f"Write a CV summary for:\n"
         f"Name: {name}\n"
@@ -1147,6 +1160,9 @@ def generate_summary(
         f"Top Skills: {', '.join(skill_names) if skill_names else 'not specified'}\n"
         f"Most Recent Role: {last_title} at {last_company}\n"
     )
+    
+    if job_desc:
+        user_prompt += f"\nJob Description (tailor summary to match this role):\n{job_desc[:1000]}\n"
 
     try:
         response = groq_client.chat.completions.create(
@@ -1168,15 +1184,27 @@ def generate_summary(
 # AI: Improve Experience Bullets (Feature 3)
 # ────────────────────────────────────────────────────────────────────────────────────
 
-from pydantic import BaseModel as _BaseModel
 from typing import List as _List
 
-class ImproveBulletsRequest(_BaseModel):
+class ImproveBulletsRequest(BaseModel):
     job_title: str = ''
     company: str = ''
     bullets: _List[str] = []
     jd_keywords: _List[str] = []
     jd_snippet: str = ''  # per-entry JD pasted by user
+    job_description: str = ''  # Full job description for language detection
+
+
+def _extract_top_keywords(jd: str, n: int = 15) -> list:
+    """Extract top N keywords from job description."""
+    import re
+    keywords = set(
+        re.sub(r'[^a-z0-9\s]', '', jd.lower()).split()
+    )
+    # Filter: > 4 chars, not stopwords
+    stopwords = {"with","that","this","have","from","they","will","been","were","their","about"}
+    keywords = [w for w in keywords if len(w) > 4 and w not in stopwords]
+    return list(dict.fromkeys(keywords))[:n]  # dedupe & slice
 
 
 @router.post("/{cv_id}/improve-bullets")
@@ -1186,7 +1214,140 @@ def improve_bullets(
     current_user: User = Depends(require_ai_access),
     db: Session = Depends(get_db)
 ):
-    """Use Groq AI to rewrite experience bullets with action verbs and ATS keywords."""
+    """Use Groq AI to rewrite experience bullets with action verbs, metrics, and ATS keywords."""
+    from app.utils.ai_integration import _get_working_model, client as groq_client
+    import json as _json
+    import re as _re
+
+    cv = db.query(CV).filter(CV.id == cv_id, CV.user_id == current_user.id).first()
+    if not cv:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
+
+    if not groq_client:
+        raise HTTPException(status_code=503, detail="AI service unavailable")
+
+    model = _get_working_model()
+    if not model:
+        raise HTTPException(status_code=503, detail="No working AI model available")
+
+    # Detect language from job description
+    from app.utils.language_detect import detect_language, get_language_name
+    job_desc = request.job_description or request.jd_snippet or ' '.join(request.jd_keywords or [])
+    language_code = detect_language(job_desc)
+    language_name = get_language_name(language_code)
+    print(f"[IMPROVE BULLETS] Detected language: {language_name} ({language_code})")
+
+    # Build context from JD snippet or keywords
+    jd_keywords_list = _extract_top_keywords(job_desc, 15)
+    keywords_for_prompt = ', '.join(jd_keywords_list)
+    bullets_text = ' | '.join(request.bullets) if request.bullets else ''
+
+    # ── Build language-specific prompts ──
+    if language_code == 'de':
+        system_prompt = (
+            "Du bist ein professioneller CV-Schreiber. Gib NUR ein JSON-Array von Strings aus. "
+            "Keine Vorrede, kein Markdown, keine Labels. "
+            'Format: ["bullet 1", "bullet 2", ...]'
+        )
+        
+        user_prompt = (
+            f"Schreibe die folgenden Arbeitserfahrungen neu und erweitere sie.\n"
+            f"Regeln:\n"
+            f"- Mindestens 5, maximal 8 Aufzählungspunkte\n"
+            f"- Beginne jeden Punkt mit einem starken Verb in der Vergangenheit\n"
+            f"- Füge quantifizierbare Metriken ein, wo möglich (%, €, Zeit gespart, Umfang)\n"
+            f"- Verwende exakt die gleichen Begriffe aus der Stellenbeschreibung\n"
+            f"- Füge 1–2 relevante implizite Verantwortungen für diese Rolle hinzu\n"
+            f"  die das ATS-Matching verbessern (erfinde nichts)\n"
+            f"- Jeder Punkt: 15–25 Wörter, spezifisch, ohne Füllwörter\n"
+            f"- Schreibe auf Deutsch\n\n"
+            f"Position: {request.job_title} bei {request.company}\n"
+            f"Aktuelle Punkte: {bullets_text}\n"
+            f"Stellenbeschreibungs-Schlüsselwörter: {keywords_for_prompt}"
+        )
+    else:
+        system_prompt = (
+            "You are a professional CV writer. Output ONLY a JSON array of strings. "
+            "No preamble, no markdown, no labels. "
+            'Format: ["bullet 1", "bullet 2", ...]'
+        )
+        
+        user_prompt = (
+            f"Rewrite and expand the following job experience bullets.\n"
+            f"Rules:\n"
+            f"- Minimum 5, maximum 8 bullet points\n"
+            f"- Start every bullet with a strong past-tense action verb\n"
+            f"- Include quantified metrics where inferable (%, $, time saved, scale)\n"
+            f"- Mirror keywords and terminology from the Job Description exactly\n"
+            f"- Add 1–2 relevant implied responsibilities common to this role\n"
+            f"  that increase ATS keyword match (do not fabricate specific claims)\n"
+            f"- Each bullet: 15–25 words, specific, no filler phrases\n\n"
+            f"Role: {request.job_title} at {request.company}\n"
+            f"Current Bullets: {bullets_text}\n"
+            f"Job Description Keywords: {keywords_for_prompt}"
+        )
+
+    # Try up to 2 times
+    for attempt in range(2):
+        try:
+            response = groq_client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=800,
+                temperature=0.6,
+            )
+            raw = (response.choices[0].message.content or '').strip()
+            
+            # Clean up markdown
+            raw = raw.replace('```json', '').replace('```', '').strip()
+            
+            # Try to extract JSON array
+            m = _re.search(r'\[.*\]', raw, _re.DOTALL)
+            if m:
+                bullets = _json.loads(m.group())
+            else:
+                bullets = _json.loads(raw)
+            
+            if not isinstance(bullets, list) or not bullets:
+                raise ValueError('Invalid response format')
+            
+            # Filter valid bullets
+            valid_bullets = [b.strip() for b in bullets if isinstance(b, str) and b.strip()]
+            if valid_bullets:
+                return {"bullets": valid_bullets}
+        
+        except Exception as e:
+            if attempt == 0:
+                continue  # Retry once
+            else:
+                # On final failure, return raw text for manual editing
+                return {
+                    "bullets": [line.strip().lstrip('•-* ') for line in raw.split('\n') if line.strip()],
+                    "error": "JSON parsing failed; showing raw text for manual edit",
+                    "raw": raw
+                }
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# AI: Suggest Skills from Job Description
+# ────────────────────────────────────────────────────────────────────────────────
+
+class SuggestSkillsRequest(BaseModel):
+    job_description: str = ''
+    current_skills: _List[str] = []
+
+
+@router.post("/{cv_id}/suggest-skills")
+def suggest_skills(
+    cv_id: int,
+    request: SuggestSkillsRequest,
+    current_user: User = Depends(require_ai_access),
+    db: Session = Depends(get_db)
+):
+    """Use Groq AI to extract and suggest skills from job description."""
     from app.utils.ai_integration import _get_working_model, client as groq_client
     import json as _json
 
@@ -1201,48 +1362,57 @@ def improve_bullets(
     if not model:
         raise HTTPException(status_code=503, detail="No working AI model available")
 
-    bullets_text = '\n'.join(f'- {b}' for b in request.bullets) if request.bullets else '(no bullets yet)'
-    keywords_text = ', '.join(request.jd_keywords[:10]) if request.jd_keywords else 'none'
-    jd_context = ''
-    if request.jd_snippet.strip():
-        # Use full snippet (truncated) as primary context
-        jd_context = f"\nJob Description (use this to tailor language):\n{request.jd_snippet[:800]}\n"
-    elif request.jd_keywords:
-        jd_context = f"\nJD keywords to weave in: {keywords_text}\n"
-
     system_prompt = (
-        "Rewrite CV bullets. Output ONLY a JSON array of strings. "
-        'No preamble, no markdown. Format: ["bullet 1", "bullet 2", "bullet 3"]'
+        "You are an expert recruiter. Output ONLY a JSON array of skill strings. "
+        "No preamble, no markdown, no labels. "
+        'Format: ["skill 1", "skill 2", ...]'
     )
+    
     user_prompt = (
-        f"Rewrite these bullets — strong action verbs, ATS-optimized, "
-        f"include metrics where inferable, max 4 bullets.\n"
-        f"Role: {request.job_title} at {request.company}\n"
-        f"{jd_context}"
-        f"Current bullets:\n{bullets_text}"
+        f"Extract technical and soft skills from this job description "
+        f"that are NOT already in the candidate's skill list.\n"
+        f"Add maximum 10 skills, most relevant first.\n"
+        f"Existing skills: {', '.join(request.current_skills) if request.current_skills else 'None'}\n"
+        f"Job Description:\n{request.job_description[:2000]}"
     )
 
-    try:
-        response = groq_client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_tokens=600,
-            temperature=0.6,
-        )
-        raw = (response.choices[0].message.content or '').strip()
-        raw = raw.replace('```json', '').replace('```', '').strip()
-        # Extract JSON array
-        import re as _re
-        m = _re.search(r'\[.*\]', raw, _re.DOTALL)
-        if m:
-            bullets = _json.loads(m.group())
-        else:
-            bullets = _json.loads(raw)
-        if not isinstance(bullets, list):
-            raise ValueError('Not a list')
-        return {"bullets": [b.strip() for b in bullets if isinstance(b, str)]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI bullet improvement failed: {str(e)}")
+    for attempt in range(2):
+        try:
+            response = groq_client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=500,
+                temperature=0.5,
+            )
+            raw = (response.choices[0].message.content or '').strip()
+            
+            # Clean up markdown
+            raw = raw.replace('```json', '').replace('```', '').strip()
+            
+            # Try to extract JSON array
+            import re as _re
+            m = _re.search(r'\[.*\]', raw, _re.DOTALL)
+            if m:
+                skills = _json.loads(m.group())
+            else:
+                skills = _json.loads(raw)
+            
+            if not isinstance(skills, list) or not skills:
+                raise ValueError('Invalid response format')
+            
+            # Filter valid skills
+            valid_skills = [s.strip() for s in skills if isinstance(s, str) and s.strip()]
+            if valid_skills:
+                return {"suggested_skills": valid_skills[:10]}
+        
+        except Exception as e:
+            if attempt == 0:
+                continue  # Retry once
+            else:
+                # On final failure, return empty
+                return {"suggested_skills": []}
+    
+    return {"suggested_skills": []}
