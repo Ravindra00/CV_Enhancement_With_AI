@@ -1,9 +1,54 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCVStore } from '../store/cvStore';
 import { cvAPI } from '../services/api';
 import CVUploadModal from '../components/CVUploadModal';
 import CVPreview from '../components/CVPreview';
+
+/**
+ * ScaledCVThumbnail — renders the full CVPreview at 40% scale inside a fixed
+ * 210×297 px (A5-ish) box so the card shows real resume content.
+ */
+const THUMB_W = 210;
+const THUMB_H = 297;
+const INNER_W = 794; // A4 width that CVPreview expects
+const SCALE = THUMB_W / INNER_W;
+
+const ScaledCVThumbnail = ({ cv }) => {
+  const theme = (cv.theme && typeof cv.theme === 'object') ? cv.theme : {};
+  const data = {
+    personal_info: cv.personal_info || { name: cv.full_name || '', jobTitle: cv.title || '' },
+    experiences:   cv.experiences   || [],
+    educations:    cv.educations    || [],
+    skills:        cv.skills        || [],
+    languages:     cv.languages     || [],
+    certifications: cv.certifications || [],
+    projects:      cv.projects      || [],
+    interests:     cv.interests     || [],
+    custom_sections: cv.custom_sections || [],
+    profile_summary: cv.profile_summary || '',
+    theme,
+  };
+  return (
+    <div style={{
+      width: THUMB_W,
+      height: THUMB_H,
+      overflow: 'hidden',
+      position: 'relative',
+      flexShrink: 0,
+    }}>
+      <div style={{
+        width: INNER_W,
+        transformOrigin: 'top left',
+        transform: `scale(${SCALE})`,
+        pointerEvents: 'none',
+        userSelect: 'none',
+      }}>
+        <CVPreview data={data} theme={theme} />
+      </div>
+    </div>
+  );
+};
 
 /* ── tiny helper ── */
 const timeAgo = (dateStr) => {
@@ -108,7 +153,7 @@ const DashboardPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen" style={{ background: 'var(--app-bg)' }}>
       {/* Delete confirm dialog */}
       {confirmDelete && (
         <DeleteConfirm
@@ -175,30 +220,15 @@ const DashboardPage = () => {
               <div
                 key={cv.id}
                 onClick={() => navigate(`/cv-editor/${cv.id}`)}
-                className="bg-white rounded-xl border border-gray-200 overflow-hidden cursor-pointer hover:shadow-lg hover:border-primary-200 transition-all duration-200 group"
+              className="app-card overflow-hidden cursor-pointer hover:shadow-lg hover:border-primary-200 transition-all duration-200 group"
               >
-                {/* Full CV preview thumbnail — correctly scaled */}
-                <div className="relative bg-gray-50 overflow-hidden" style={{ height: 200 }}>
-                  {/* 
-                    CVPreview renders at exactly 794px wide.
-                    We want it to fill a card that is ~100% of available width.
-                    We use a fixed inner width and CSS scale so the preview fills the card.
-                    transformOrigin top-left, then set the outer wrapper height to (794 * scale)-equivalent.
-                  */}
-                  <div style={{
-                    position: 'absolute',
-                    top: 0, left: 0,
-                    width: 794,
-                    transform: 'scale(var(--cv-scale, 0.24))',
-                    transformOrigin: 'top left',
-                    pointerEvents: 'none',
-                    userSelect: 'none',
-                    '--cv-scale': '0.24',
-                  }}>
-                    <CVPreview data={cv} theme={cv.theme} />
+                {/* Scaled full CV thumbnail */}
+                <div className="relative overflow-hidden bg-white" style={{ height: 200 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', height: '100%', overflow: 'hidden' }}>
+                    <ScaledCVThumbnail cv={cv} />
                   </div>
-                  {/* Overlay gradient at bottom for fade effect */}
-                  <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 56, background: 'linear-gradient(to bottom, transparent, rgba(249,250,251,0.95))' }} />
+                  {/* Fade gradient at bottom */}
+                  <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 64, background: 'linear-gradient(to bottom, transparent, rgba(249,250,251,0.97))' }} />
                   {/* Hover overlay with action buttons */}
                   <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-all duration-200 flex flex-col items-center justify-center gap-2 p-3">
                     <div className="flex gap-2 flex-wrap justify-center">

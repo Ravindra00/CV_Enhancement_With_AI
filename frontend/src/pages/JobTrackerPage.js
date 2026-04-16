@@ -13,7 +13,21 @@ const EMPTY_APP = { company: '', role: '', job_url: '', location: '', salary_ran
 
 const Badge = ({ status }) => {
     const s = STATUSES.find(x => x.key === status) || STATUSES[0];
-    return <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: s.bg, color: s.color }}>{s.emoji} {s.label}</span>;
+    const darkMap = {
+        saved: 'dark:bg-gray-700 dark:text-gray-300',
+        applied: 'dark:bg-blue-900 dark:text-blue-300',
+        interviewing: 'dark:bg-yellow-900 dark:text-yellow-300',
+        offer: 'dark:bg-green-900 dark:text-green-300',
+        rejected: 'dark:bg-red-900 dark:text-red-300',
+    };
+    return (
+        <span
+            className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${darkMap[s.key] || ''}`}
+            style={{ background: s.bg, color: s.color }}
+        >
+            {s.emoji} {s.label}
+        </span>
+    );
 };
 
 const JobTrackerPage = () => {
@@ -126,27 +140,27 @@ const JobTrackerPage = () => {
 
     const f = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
 
-    const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300';
-    const labelCls = 'block text-xs font-semibold text-gray-600 mb-1';
+    const inputCls = 'w-full border border-gray-200 dark:border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300 bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100';
+    const labelCls = 'block text-xs font-semibold text-gray-600 dark:text-slate-300 mb-1';
 
     const CardApp = ({ app }) => (
-        <div className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm hover:shadow-md transition group">
+        <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded-xl p-3 shadow-sm hover:shadow-md transition group">
             <div className="flex items-start justify-between gap-1 mb-2">
                 <div>
-                    <div className="font-semibold text-gray-900 text-sm leading-tight">{app.role}</div>
-                    <div className="text-xs text-gray-500 mt-0.5">{app.company}</div>
+                    <div className="font-semibold text-gray-900 dark:text-slate-100 text-sm leading-tight">{app.role}</div>
+                    <div className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">{app.company}</div>
                 </div>
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition">
-                    <button onClick={() => openEdit(app)} className="text-gray-400 hover:text-gray-700 p-1 rounded">✏️</button>
+                    <button onClick={() => openEdit(app)} className="text-gray-400 hover:text-gray-700 dark:hover:text-slate-200 p-1 rounded">✏️</button>
                     <button onClick={() => del(app.id)} className="text-gray-400 hover:text-red-500 p-1 rounded">🗑</button>
                 </div>
             </div>
-            {app.location && <div className="text-xs text-gray-400 mb-1">📍 {app.location}</div>}
-            {app.salary_range && <div className="text-xs text-gray-400 mb-1">💰 {app.salary_range}</div>}
-            {app.applied_date && <div className="text-xs text-gray-400">📅 {new Date(app.applied_date).toLocaleDateString()}</div>}
+            {app.location && <div className="text-xs text-gray-400 dark:text-slate-500 mb-1">📍 {app.location}</div>}
+            {app.salary_range && <div className="text-xs text-gray-400 dark:text-slate-500 mb-1">💰 {app.salary_range}</div>}
+            {app.applied_date && <div className="text-xs text-gray-400 dark:text-slate-500">📅 {new Date(app.applied_date).toLocaleDateString()}</div>}
             {/* Quick status change */}
-            <div className="mt-2 pt-2 border-t border-gray-100">
-                <select value={app.status} onChange={e => changeStatus(app.id, e.target.value)} className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1 focus:outline-none cursor-pointer">
+            <div className="mt-2 pt-2 border-t border-gray-100 dark:border-slate-600">
+                <select value={app.status} onChange={e => changeStatus(app.id, e.target.value)} className="w-full text-xs border border-gray-200 dark:border-slate-600 rounded-lg px-2 py-1 focus:outline-none cursor-pointer bg-white dark:bg-slate-700 text-gray-900 dark:text-slate-100">
                     {STATUSES.map(s => <option key={s.key} value={s.key}>{s.emoji} {s.label}</option>)}
                 </select>
             </div>
@@ -154,19 +168,19 @@ const JobTrackerPage = () => {
     );
 
     return (
-        <div className="min-h-screen bg-gray-50 py-8 px-6">
+        <div className="min-h-screen bg-gray-50 dark:bg-slate-900 py-8 px-6">
             <div className="max-w-7xl mx-auto">
                 {/* Header */}
                 <div className="flex items-center justify-between mb-8">
                     <div>
-                        <h1 className="text-2xl font-bold text-gray-900">Job Tracker</h1>
-                        <p className="text-gray-500 text-sm mt-1">Track every application in one place</p>
+                        <h1 className="text-2xl font-bold text-gray-900 dark:text-slate-100">Job Tracker</h1>
+                        <p className="text-gray-500 dark:text-slate-400 text-sm mt-1">Track every application in one place</p>
                     </div>
                     <div className="flex items-center gap-3">
                         {/* View toggle */}
-                        <div className="flex bg-white border border-gray-200 rounded-xl overflow-hidden">
+                        <div className="flex bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded-xl overflow-hidden">
                             {['kanban', 'table'].map(v => (
-                                <button key={v} onClick={() => setView(v)} className={`px-4 py-2 text-sm font-medium transition ${view === v ? 'bg-primary text-white' : 'text-gray-600 hover:bg-gray-50'}`}>
+                                <button key={v} onClick={() => setView(v)} className={`px-4 py-2 text-sm font-medium transition ${view === v ? 'bg-primary text-white' : 'text-gray-600 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700'}`}>
                                     {v === 'kanban' ? '⊡ Kanban' : '≡ Table'}
                                 </button>
                             ))}
@@ -175,17 +189,17 @@ const JobTrackerPage = () => {
                         <div className="relative">
                             <button
                                 onClick={() => setShowExport(e => !e)}
-                                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-50 transition shadow-sm"
+                                className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 text-gray-700 dark:text-slate-200 rounded-xl font-semibold hover:bg-gray-50 dark:hover:bg-slate-700 transition shadow-sm"
                             >
                                 ⬇ Export
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                             </button>
                             {showExport && (
-                                <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-50 w-44 overflow-hidden">
-                                    <button onClick={exportCSV} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2">
+                                <div className="absolute right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-600 rounded-xl shadow-xl z-50 w-44 overflow-hidden">
+                                    <button onClick={exportCSV} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-slate-700 dark:text-slate-200 flex items-center gap-2">
                                         📊 Export as CSV
                                     </button>
-                                    <button onClick={exportPDF} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 flex items-center gap-2 border-t border-gray-100">
+                                    <button onClick={exportPDF} className="w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 dark:hover:bg-slate-700 dark:text-slate-200 flex items-center gap-2 border-t border-gray-100 dark:border-slate-700">
                                         🖨 Print as PDF
                                     </button>
                                 </div>
@@ -200,26 +214,26 @@ const JobTrackerPage = () => {
                 {/* Stats row */}
                 <div className="grid grid-cols-5 gap-3 mb-8">
                     {STATUSES.map(s => (
-                        <div key={s.key} className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+                        <div key={s.key} className="bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 p-4 text-center">
                             <div className="text-2xl mb-1">{s.emoji}</div>
                             <div className="text-xl font-bold" style={{ color: s.color }}>{stats[s.key] || 0}</div>
-                            <div className="text-xs text-gray-500">{s.label}</div>
+                            <div className="text-xs text-gray-500 dark:text-slate-400">{s.label}</div>
                         </div>
                     ))}
                 </div>
 
                 {loading ? (
-                    <div className="text-center py-16 text-gray-400">Loading…</div>
+                    <div className="text-center py-16 text-gray-400 dark:text-slate-500">Loading…</div>
                 ) : view === 'kanban' ? (
                     /* ─── Kanban ─── */
                     <div className="grid grid-cols-5 gap-4">
                         {STATUSES.map(s => {
                             const col = apps.filter(a => a.status === s.key);
                             return (
-                                <div key={s.key} className="bg-white rounded-2xl border border-gray-200 p-3 min-h-[500px]">
+                                <div key={s.key} className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 p-3 min-h-[500px]">
                                     <div className="flex items-center justify-between mb-3">
                                         <div className="text-sm font-semibold" style={{ color: s.color }}>{s.emoji} {s.label}</div>
-                                        <span className="text-xs font-bold text-gray-400">{col.length}</span>
+                                        <span className="text-xs font-bold text-gray-400 dark:text-slate-500">{col.length}</span>
                                     </div>
                                     <div className="space-y-2">
                                         {col.map(app => <CardApp key={app.id} app={app} />)}
@@ -230,28 +244,28 @@ const JobTrackerPage = () => {
                     </div>
                 ) : (
                     /* ─── Table ─── */
-                    <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl border border-gray-200 dark:border-slate-700 overflow-hidden">
                         <table className="w-full text-sm">
                             <thead>
-                                <tr className="bg-gray-50 border-b border-gray-200">
+                                <tr className="bg-gray-50 dark:bg-slate-700 border-b border-gray-200 dark:border-slate-600">
                                     {['Company', 'Role', 'Location', 'Salary', 'Status', 'Applied', ''].map(h => (
-                                        <th key={h} className="text-left text-xs font-semibold text-gray-600 px-4 py-3">{h}</th>
+                                        <th key={h} className="text-left text-xs font-semibold text-gray-600 dark:text-slate-300 px-4 py-3">{h}</th>
                                     ))}
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                                 {apps.length === 0 ? (
-                                    <tr><td colSpan={7} className="text-center py-12 text-gray-400">No applications yet</td></tr>
+                                    <tr><td colSpan={7} className="text-center py-12 text-gray-400 dark:text-slate-500">No applications yet</td></tr>
                                 ) : apps.map(app => (
-                                    <tr key={app.id} className="border-b border-gray-100 hover:bg-gray-50 transition">
-                                        <td className="px-4 py-3 font-medium text-gray-900">{app.company}</td>
-                                        <td className="px-4 py-3 text-gray-700">{app.role}</td>
-                                        <td className="px-4 py-3 text-gray-500 text-xs">{app.location || '—'}</td>
-                                        <td className="px-4 py-3 text-gray-500 text-xs">{app.salary_range || '—'}</td>
+                                    <tr key={app.id} className="hover:bg-gray-50 dark:hover:bg-slate-700 transition">
+                                        <td className="px-4 py-3 font-medium text-gray-900 dark:text-slate-100">{app.company}</td>
+                                        <td className="px-4 py-3 text-gray-700 dark:text-slate-200">{app.role}</td>
+                                        <td className="px-4 py-3 text-gray-500 dark:text-slate-400 text-xs">{app.location || '—'}</td>
+                                        <td className="px-4 py-3 text-gray-500 dark:text-slate-400 text-xs">{app.salary_range || '—'}</td>
                                         <td className="px-4 py-3"><Badge status={app.status} /></td>
-                                        <td className="px-4 py-3 text-gray-500 text-xs">{app.applied_date ? new Date(app.applied_date).toLocaleDateString() : '—'}</td>
+                                        <td className="px-4 py-3 text-gray-500 dark:text-slate-400 text-xs">{app.applied_date ? new Date(app.applied_date).toLocaleDateString() : '—'}</td>
                                         <td className="px-4 py-3 flex gap-2">
-                                            <button onClick={() => openEdit(app)} className="text-gray-400 hover:text-gray-700 transition">✏️</button>
+                                            <button onClick={() => openEdit(app)} className="text-gray-400 hover:text-gray-700 dark:hover:text-slate-200 transition">✏️</button>
                                             <button onClick={() => del(app.id)} className="text-gray-400 hover:text-red-500 transition">🗑</button>
                                         </td>
                                     </tr>
@@ -265,8 +279,8 @@ const JobTrackerPage = () => {
             {/* ─── Modal ─── */}
             {showModal && (
                 <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
-                        <h2 className="text-lg font-bold text-gray-900 mb-5">{editing ? 'Edit Application' : 'Add New Application'}</h2>
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
+                        <h2 className="text-lg font-bold text-gray-900 dark:text-slate-100 mb-5">{editing ? 'Edit Application' : 'Add New Application'}</h2>
                         <div className="space-y-3">
                             <div className="grid grid-cols-2 gap-3">
                                 <div><label className={labelCls}>Company *</label><input className={inputCls} value={form.company} onChange={e => f('company', e.target.value)} placeholder="Google" /></div>
@@ -300,7 +314,7 @@ const JobTrackerPage = () => {
                             <div><label className={labelCls}>Notes</label><textarea className={`${inputCls} resize-none`} rows={3} value={form.notes || ''} onChange={e => f('notes', e.target.value)} placeholder="Interview notes, recruiter name…" /></div>
                         </div>
                         <div className="flex gap-2 justify-end mt-5">
-                            <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+                            <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">Cancel</button>
                             <button onClick={save} disabled={saving} className="px-5 py-2 bg-primary text-white rounded-lg text-sm font-semibold hover:bg-primary-700 disabled:opacity-50">
                                 {saving ? 'Saving…' : editing ? 'Save Changes' : 'Add Application'}
                             </button>

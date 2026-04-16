@@ -12,7 +12,7 @@ from typing import Dict, List, Any, Optional
 # ── Section keyword maps (multilingual) ──────────────────────────────────────
 SECTION_KEYWORDS = {
     'summary': [
-        'profil', 'profile', 'summary', 'professional summary', 'about me',
+        'profil', 'profile', 'summary', 'professional summary', 'about me', 'about',
         'objective', 'career objective', 'über mich', 'kurzprofil',
         'zusammenfassung', 'berufsprofil', 'persönliches profil',
         'resume summary', 'executive summary', 'profil professionnel',
@@ -58,8 +58,13 @@ SECTION_KEYWORDS = {
         'projets', 'proyectos', 'progetti',
     ],
     'interests': [
-        'interessen', 'hobbys', 'hobbies', 'freizeit',
-        'interests', 'hobbies', 'activities', 'volunteering',
+        'interessen', 'hobbys', 'hobbies', 'freizeit', 'ehrenamt', 'ehrenamtliche tätigkeit',
+        'interests', 'hobbies', 'activities', 'volunteering', 'volunteer work',
+        'extracurricular', 'community involvement', 'personal interests',
+    ],
+    'references': [
+        'referenzen', 'referenz',
+        'references', 'referees', 'references available upon request',
     ],
 }
 
@@ -139,11 +144,11 @@ def parse_cv_text(text: str) -> Dict[str, Any]:
     lines = [l.rstrip() for l in text.split('\n')]
     clean_lines = [l.strip() for l in lines if l.strip()]
 
-    # ── Personal info ──────────────────────────────────────────────────────
-    parsed['personalInfo'] = _extract_personal_info(text, clean_lines)
-
     # ── Identify sections ─────────────────────────────────────────────────
     sections = _split_into_sections(lines)
+
+    # ── Personal info ──────────────────────────────────────────────────────
+    parsed['personalInfo'] = _extract_personal_info(text, clean_lines, sections)
 
     # ── Parse each section ────────────────────────────────────────────────
     for section_type, (header, content_lines) in sections.items():
@@ -168,7 +173,7 @@ def parse_cv_text(text: str) -> Dict[str, Any]:
 
 # ── Personal info extraction ──────────────────────────────────────────────────
 
-def _extract_personal_info(text: str, lines: List[str]) -> Dict[str, str]:
+def _extract_personal_info(text: str, lines: List[str], sections: Dict = None) -> Dict[str, str]:
     info: Dict[str, str] = {}
 
     # Email
@@ -232,17 +237,124 @@ def _extract_personal_info(text: str, lines: List[str]) -> Dict[str, str]:
             info['name'] = line.strip()
             break
 
-    # Job title — usually line immediately after name
-    if info.get('name'):
-        name_idx = next((i for i, l in enumerate(lines) if info['name'] in l), -1)
-        if name_idx >= 0 and name_idx + 1 < len(lines):
-            candidate = lines[name_idx + 1].strip()
-            if (candidate and 2 < len(candidate) < 60
-                    and not re.search(r'[@\+]', candidate)
-                    and not re.search(r'\d{4}', candidate)):
-                info['jobTitle'] = candidate
+    # Job title — three-tier fallback strategy (NEVER assigns filename)
+    if 'jobTitle' not in info:
+        info['jobTitle'] = _extract_job_title(text, lines, info, sections or {})
 
     return info
+
+
+# Known job-title keywords (case-insensitive partial match)
+_TITLE_KEYWORDS = [
+    'engineer', 'developer', 'manager', 'analyst', 'administrator',
+    'designer', 'consultant', 'architect', 'specialist', 'director',
+    'coordinator', 'lead', 'officer', 'executive', 'intern',
+    'scientist', 'researcher', 'technician', 'programmer', 'strategist',
+]
+
+
+def _extract_job_title(text: str, lines: List[str], info: Dict[str, str], sections: Dict) -> str:
+    """
+    Extract job title using three patterns in priority order.
+    Never returns a filename, file path, or extension string.
+    """
+    def _looks_like_title(candidate: str) -> bool:
+        """Return True if the string looks like a professional job title."""
+        if not candidate or len(candidate) < 3 or len(candidate) > 80:
+            return False
+        # Reject anything that looks like a file path or email
+        if re.search(r'[@\./\\]', candidate):
+            return False
+        # Reject lines with four-digit years (likely dates)
+        if re.search(r'\b\d{4}\b', candidate):
+            return False
+        # Must contain at least one alphabetic word
+        if not re.search(r'[a-zA-Z]{3,}', candidate):
+            return False
+        return True
+
+    def _contains_title_keyword(s: str) -> bool:
+        sl = s.lower()
+        return any(kw in sl for kw in _TITLE_KEYWORDS)
+
+    # ── Tier 1: line directly below the candidate name ──────────────────
+    # Common section header words that must never be accepted as a job title
+    _SECTION_HEADERS = {
+        'experience', 'education', 'skills', 'summary', 'objective',
+        'profile', 'certifications', 'certification', 'languages', 'projects',
+        'interests', 'references', 'publications', 'awards', 'work history',
+        'employment', 'qualifications', 'achievements', 'activities',
+    }
+
+    if info.get('name'):
+        name_line = info['name']
+        # Find the name among the first 5 clean lines
+        for idx, line in enumerate(lines[:5]):
+            if name_line in line:
+                # Check the next 1-2 lines
+                for offset in (1, 2):
+                    next_idx = idx + offset
+                    if next_idx < len(lines):
+                        candidate = lines[next_idx].strip()
+                        # Skip blank or re-detection of section headers
+                        if candidate.lower() in _SECTION_HEADERS:
+                            continue
+                        if _looks_like_title(candidate) and _contains_title_keyword(candidate):
+                            return candidate
+                        # Accept even without keyword if it's short and sensible
+                        if (_looks_like_title(candidate) and 3 < len(candidate) < 50
+                                and not re.search(r'\d{3,}', candidate)
+                                and candidate.lower() not in _SECTION_HEADERS):
+                            return candidate
+                break
+
+    # ── Tier 2: most recent job title from experience entries ───────────
+    exp_section = sections.get('experience', ('', []))[1] if sections else []
+    if not exp_section:
+        # Try scanning raw text for experience section lines
+        exp_section = []
+        in_exp = False
+        for line in text.split('\n'):
+            stripped = line.strip()
+            if re.search(r'experience|erfahrung|employment|work history', stripped, re.I) and len(stripped) < 40:
+                in_exp = True
+                continue
+            if in_exp and _detect_section_header(stripped) and not re.search(r'experience|erfahrung|employment|work history', stripped, re.I):
+                break
+            if in_exp:
+                exp_section.append(stripped)
+
+    for line in exp_section[:15]:
+        if not line:
+            continue
+        # Strip common date suffixes so the year doesn't cause false rejection
+        line_clean = re.sub(r'[\|,]?\s*\d{4}\s*[-–—]\s*(?:\d{4}|present|current|heute|now)\b', '', line, flags=re.I).strip()
+        line_clean = re.sub(r'\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*\d{4}\b', '', line_clean, flags=re.I).strip()
+        if line_clean and _contains_title_keyword(line_clean) and _looks_like_title(line_clean) and len(line_clean) < 70:
+            # Prefer lines that look like a role (not a company)
+            if not re.search(r'\b(Ltd|GmbH|Inc|Corp|LLC|AG|SA|PLC|SAS)\b', line_clean, re.I):
+                return line_clean.split(',')[0].split(' at ')[0].split(' bei ')[0].strip()
+
+    # ── Tier 3: role noun from Objective / Summary section ──────────────
+    summary_text = sections.get('summary', ('', []))[1] if sections else []
+    summary_blob = ' '.join(summary_text) if isinstance(summary_text, list) else str(summary_text)
+    if not summary_blob:
+        # Fall back to a simple pattern in the first 200 chars of the document
+        summary_blob = text[:200]
+    # Look for 'experienced X', 'a Y professional', 'seeking Z role'
+    patterns = [
+        r'(?:experienced|seasoned|dedicated|results[-\s]driven)?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}(?:\s+(?:' + '|'.join(_TITLE_KEYWORDS) + r'))[a-z]*)'
+        , r'(?:an?|the)\s+([A-Z][a-z]+(?:\s+[A-Z]?[a-z]+){0,3}(?:engineer|developer|manager|analyst|designer|specialist|consultant|architect|director|lead|officer|executive))',
+    ]
+    for pat in patterns:
+        m = re.search(pat, summary_blob, re.IGNORECASE)
+        if m:
+            candidate = m.group(1).strip()
+            if _looks_like_title(candidate):
+                return candidate.title()
+
+    # ── Fallback: empty (placeholder shown in UI) ────────────────────────
+    return ''
 
 
 # ── Section splitting ─────────────────────────────────────────────────────────
@@ -323,7 +435,7 @@ DATE_RANGE_RE = re.compile(
     r'(\d{1,2}/\d{4}|\d{4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|'
     r'januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)'
     r'[\s.]*\d{4})'
-    r'\s*[–\-—\/]\s*'
+    r'\s*(?:[–\-—\/]|\bto\b|\bbis\b)\s*'
     r'(\d{1,2}/\d{4}|\d{4}|present|heute|aktuell|current|'
     r'(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|'
     r'januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)'

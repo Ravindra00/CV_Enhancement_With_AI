@@ -423,18 +423,24 @@ def upload_cv_file(
             f.write(file.file.read())
 
         parsed_data = parse_cv_file(file_path)
+        pi = parsed_data.get('personalInfo', {})
 
         # --- Flat fields ---
-        cv.title = os.path.splitext(file.filename)[0]
         cv.file_path = file_path
         cv.original_text = parsed_data.get('original_text', '')
 
-        cv.full_name = parsed_data.get('full_name') or parsed_data.get('personalInfo', {}).get('name', '')
-        cv.email = parsed_data.get('email') or parsed_data.get('personalInfo', {}).get('email', '')
-        cv.phone = parsed_data.get('phone') or parsed_data.get('personalInfo', {}).get('phone', '')
-        cv.location = parsed_data.get('location') or parsed_data.get('personalInfo', {}).get('location', '')
-        cv.linkedin_url = parsed_data.get('linkedin_url') or parsed_data.get('personalInfo', {}).get('linkedin', '')
-        cv.profile_summary = parsed_data.get('profile_summary') or parsed_data.get('personalInfo', {}).get('summary', '')
+        cv.full_name = parsed_data.get('full_name') or pi.get('name', '')
+        cv.email = parsed_data.get('email') or pi.get('email', '')
+        cv.phone = parsed_data.get('phone') or pi.get('phone', '')
+        cv.location = parsed_data.get('location') or pi.get('location', '')
+        cv.linkedin_url = parsed_data.get('linkedin_url') or pi.get('linkedin', '')
+        cv.profile_summary = parsed_data.get('profile_summary') or pi.get('summary', '')
+
+        # BUG 1 FIX: derive cv.title from job title, NOT from filename.
+        # Priority order: parsed jobTitle → name → filename stem (fallback only).
+        parsed_job_title = pi.get('jobTitle', '').strip()
+        filename_stem = os.path.splitext(file.filename)[0]
+        cv.title = parsed_job_title or cv.full_name or filename_stem
 
         # --- JSON sections ---
         cv.educations = parsed_data.get('education') or parsed_data.get('educations', [])
@@ -444,15 +450,17 @@ def upload_cv_file(
         cv.languages = parsed_data.get('languages', [])
         cv.projects = parsed_data.get('projects', [])
 
-        # FIX: build personal_info so the editor gets a fully-populated object
+        # Build personal_info so the editor gets a fully-populated object.
+        # 'jobTitle' field is set explicitly so it never carries the filename.
         cv.personal_info = {
             'name': cv.full_name or '',
-            'title': cv.title or '',
+            'jobTitle': parsed_job_title,
+            'title': parsed_job_title,
             'email': cv.email or '',
             'phone': cv.phone or '',
             'location': cv.location or '',
             'linkedin': cv.linkedin_url or '',
-            'website': parsed_data.get('website', ''),
+            'website': pi.get('website', ''),
             'summary': cv.profile_summary or '',
             'photo': cv.photo_path or '',
         }
@@ -605,7 +613,7 @@ def analyze_cv_endpoint(
 def customize_cv(
     cv_id: int,
     request: CVCustomizationRequest,
-    current_user: User = Depends(require_ai_access),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -681,7 +689,7 @@ def customize_cv(
 def enhance_cv_for_job_endpoint(
     cv_id: int,
     request: CVCustomizationRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_ai_access),
     db: Session = Depends(get_db)
 ):
     """
@@ -1075,3 +1083,166 @@ def apply_suggestion(
 # ════════════════════════════════════════════════════════════════════════════════════
 
 
+# ────────────────────────────────────────────────────────────────────────────────────
+# AI: Generate Professional Summary (Feature 2)
+# ────────────────────────────────────────────────────────────────────────────────────
+
+@router.post("/{cv_id}/generate-summary")
+def generate_summary(
+    cv_id: int,
+    current_user: User = Depends(require_ai_access),
+    db: Session = Depends(get_db)
+):
+    """Use Groq AI to write a professional CV summary for the user."""
+    from app.utils.ai_integration import _get_working_model, client as groq_client
+
+    cv = db.query(CV).filter(CV.id == cv_id, CV.user_id == current_user.id).first()
+    if not cv:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
+
+    pi = _get_personal_info(cv)
+    name = pi.get('name', current_user.name or 'the candidate')
+    job_title = pi.get('jobTitle', pi.get('title', ''))
+
+    # Derive years of experience from oldest start date
+    exps = cv.experiences if isinstance(cv.experiences, list) else []
+    years_exp = ''
+    start_years = []
+    for exp in exps:
+        sd = (exp.get('startDate') or exp.get('start_date') or '').strip()
+        if sd and sd[:4].isdigit():
+            start_years.append(int(sd[:4]))
+    if start_years:
+        years_exp = str(2025 - min(start_years))
+
+    # Top 5 skills
+    skills = cv.skills if isinstance(cv.skills, list) else []
+    skill_names = [s.get('name', str(s)) if isinstance(s, dict) else str(s) for s in skills[:5]]
+
+    # Most recent role
+    last_title = ''
+    last_company = ''
+    if exps:
+        first_exp = exps[0]
+        last_title = first_exp.get('position') or first_exp.get('role') or ''
+        last_company = first_exp.get('company', '')
+
+    if not groq_client:
+        raise HTTPException(status_code=503, detail="AI service unavailable")
+
+    model = _get_working_model()
+    if not model:
+        raise HTTPException(status_code=503, detail="No working AI model available")
+
+    system_prompt = (
+        "Write professional CV summaries. Output ONLY the summary. "
+        "No labels, no preamble, no markdown. 3-4 sentences, first person, active voice. "
+        "Banned words: passionate, dynamic, leverage, results-driven, team player, detail-oriented."
+    )
+    user_prompt = (
+        f"Write a CV summary for:\n"
+        f"Name: {name}\n"
+        f"Job Title: {job_title}\n"
+        f"Years of Experience: {years_exp or 'not specified'}\n"
+        f"Top Skills: {', '.join(skill_names) if skill_names else 'not specified'}\n"
+        f"Most Recent Role: {last_title} at {last_company}\n"
+    )
+
+    try:
+        response = groq_client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=250,
+            temperature=0.7,
+        )
+        summary = (response.choices[0].message.content or '').strip()
+        return {"summary": summary}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI generation failed: {str(e)}")
+
+
+# ────────────────────────────────────────────────────────────────────────────────────
+# AI: Improve Experience Bullets (Feature 3)
+# ────────────────────────────────────────────────────────────────────────────────────
+
+from pydantic import BaseModel as _BaseModel
+from typing import List as _List
+
+class ImproveBulletsRequest(_BaseModel):
+    job_title: str = ''
+    company: str = ''
+    bullets: _List[str] = []
+    jd_keywords: _List[str] = []
+    jd_snippet: str = ''  # per-entry JD pasted by user
+
+
+@router.post("/{cv_id}/improve-bullets")
+def improve_bullets(
+    cv_id: int,
+    request: ImproveBulletsRequest,
+    current_user: User = Depends(require_ai_access),
+    db: Session = Depends(get_db)
+):
+    """Use Groq AI to rewrite experience bullets with action verbs and ATS keywords."""
+    from app.utils.ai_integration import _get_working_model, client as groq_client
+    import json as _json
+
+    cv = db.query(CV).filter(CV.id == cv_id, CV.user_id == current_user.id).first()
+    if not cv:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
+
+    if not groq_client:
+        raise HTTPException(status_code=503, detail="AI service unavailable")
+
+    model = _get_working_model()
+    if not model:
+        raise HTTPException(status_code=503, detail="No working AI model available")
+
+    bullets_text = '\n'.join(f'- {b}' for b in request.bullets) if request.bullets else '(no bullets yet)'
+    keywords_text = ', '.join(request.jd_keywords[:10]) if request.jd_keywords else 'none'
+    jd_context = ''
+    if request.jd_snippet.strip():
+        # Use full snippet (truncated) as primary context
+        jd_context = f"\nJob Description (use this to tailor language):\n{request.jd_snippet[:800]}\n"
+    elif request.jd_keywords:
+        jd_context = f"\nJD keywords to weave in: {keywords_text}\n"
+
+    system_prompt = (
+        "Rewrite CV bullets. Output ONLY a JSON array of strings. "
+        'No preamble, no markdown. Format: ["bullet 1", "bullet 2", "bullet 3"]'
+    )
+    user_prompt = (
+        f"Rewrite these bullets — strong action verbs, ATS-optimized, "
+        f"include metrics where inferable, max 4 bullets.\n"
+        f"Role: {request.job_title} at {request.company}\n"
+        f"{jd_context}"
+        f"Current bullets:\n{bullets_text}"
+    )
+
+    try:
+        response = groq_client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=600,
+            temperature=0.6,
+        )
+        raw = (response.choices[0].message.content or '').strip()
+        raw = raw.replace('```json', '').replace('```', '').strip()
+        # Extract JSON array
+        import re as _re
+        m = _re.search(r'\[.*\]', raw, _re.DOTALL)
+        if m:
+            bullets = _json.loads(m.group())
+        else:
+            bullets = _json.loads(raw)
+        if not isinstance(bullets, list):
+            raise ValueError('Not a list')
+        return {"bullets": [b.strip() for b in bullets if isinstance(b, str)]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI bullet improvement failed: {str(e)}")

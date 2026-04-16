@@ -255,12 +255,13 @@ Summary exists: {'Yes' if cv_data.get('summary') or cv_data.get('profile_summary
 Keyword match score: {score}/100
 Missing keywords: {', '.join(missing[:10])}"""
 
-        # Detect CV language - use only unambiguously German words (not common prepositions)
+        # Detect language from both the CV and the job description
         sample_text = " ".join([
             json.dumps(exps[:3], ensure_ascii=False)[:500],
             json.dumps(skills[:20], ensure_ascii=False)[:200],
-            str(cv_data.get('summary') or '')[:300],
+            str(cv_data.get('summary') or cv_data.get('profile_summary') or '')[:300],
         ]).lower()
+        jd_lower = job_desc.lower()
         german_indicators = [
             'erfahrung', 'kenntnisse', 'fähigkeiten', 'entwicklung',
             'verantwortlich', 'unternehmen', 'aufgaben', 'tätigkeiten',
@@ -269,12 +270,22 @@ Missing keywords: {', '.join(missing[:10])}"""
             'deutsch', 'englisch', 'muttersprache', 'bewerber',
             'softwareentwickler', 'projektmanager', 'datenbankadministrator',
             'werkzeuge', 'projekte', 'sprachen', 'bildung',
+            # JD-specific German words
+            'stellenangebot', 'stelle', 'bewerbung', 'einstellung',
+            'vollzeit', 'teilzeit', 'homeoffice', 'gehalt', 'vergütung',
+            'anforderungen', 'wir suchen', 'wir bieten', 'idealerweise',
+            'abgeschlossen', 'mehrjährige', 'teamfähig', 'eigenverantwortlich',
         ]
-        german_score = sum(1 for w in german_indicators if w in sample_text)
+        cv_german_score = sum(1 for w in german_indicators if w in sample_text)
+        jd_german_score = sum(1 for w in german_indicators if w in jd_lower)
+        is_german = (cv_german_score >= 2) or (jd_german_score >= 2)
         lang_note = (
-            "IMPORTANT: The CV is in German. Write ALL suggestions, descriptions, "
-            "and examples in German. Do NOT switch to English under any circumstances.\n\n"
-            if german_score >= 2 else ""
+            "***SPRACHE — HÖCHSTE PRIORITÄT***\n"
+            "Dieser Lebenslauf und/oder die Stellenausschreibung ist auf DEUTSCH.\n"
+            "Schreibe ALLE Vorschläge, Beschreibungen und Beispiele auf Deutsch.\n"
+            "Verwende KEIN Englisch unter keinen Umständen.\n"
+            "***ENDE***\n\n"
+            if is_german else ""
         )
 
         prompt = f"""{lang_note}You are an expert CV coach helping a candidate tailor their CV for a specific job.

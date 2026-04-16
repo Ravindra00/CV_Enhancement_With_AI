@@ -4,13 +4,96 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ═══════════════════════════════════════════════════════════════
+   DESIGN TOKENS — Light & Dark via CSS custom properties
+   Applied by toggling .dark on <html>
+═══════════════════════════════════════════════════════════════ */
+
 :root {
+  /* Brand */
   --color-primary: #e11d48;
   --color-primary-dark: #be123c;
   --color-primary-light: #fda4af;
-  --color-bg: #f8f8f8;
+
+  /* Backgrounds */
+  --app-bg:             #f8fafc;
+  --app-panel:          #ffffff;
+  --app-sidebar:        #f1f5f9;
+  --app-input-bg:       #ffffff;
+
+  /* Text */
+  --app-text-primary:   #0f172a;
+  --app-text-secondary: #64748b;
+  --app-text-muted:     #94a3b8;
+
+  /* Borders */
+  --app-border:         #e2e8f0;
+  --app-input-border:   #cbd5e1;
+
+  /* Semantic */
+  --app-ats-bg:         #f0fdf4;
+  --app-ats-border:     #bbf7d0;
+  --app-cover-bg:       #f8fafc;
 }
 
+html.dark {
+  /* Backgrounds */
+  --app-bg:             #0f172a;
+  --app-panel:          #1e293b;
+  --app-sidebar:        #1a2336;
+  --app-input-bg:       #0f172a;
+
+  /* Text */
+  --app-text-primary:   #e2e8f0;
+  --app-text-secondary: #94a3b8;
+  --app-text-muted:     #64748b;
+
+  /* Borders */
+  --app-border:         #334155;
+  --app-input-border:   #475569;
+
+  /* Semantic */
+  --app-ats-bg:         #14532d;
+  --app-ats-border:     #166534;
+  --app-cover-bg:       #1e293b;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   APP UTILITY CLASSES (consumed by components via className)
+═══════════════════════════════════════════════════════════════ */
+@layer components {
+  .app-bg           { background-color: var(--app-bg); }
+  .app-panel        { background-color: var(--app-panel); }
+  .app-sidebar      { background-color: var(--app-sidebar); }
+  .app-bg-secondary { background-color: var(--app-sidebar); }
+  .app-border       { border-color: var(--app-border); }
+  .app-text-primary  { color: var(--app-text-primary); }
+  .app-text-secondary { color: var(--app-text-secondary); }
+  .app-text-muted   { color: var(--app-text-muted); }
+  .app-input {
+    background-color: var(--app-input-bg);
+    border-color: var(--app-input-border);
+    color: var(--app-text-primary);
+    border-width: 1px;
+    border-style: solid;
+  }
+  .app-input::placeholder { color: var(--app-text-muted); }
+
+  /* Nav bar */
+  .app-nav {
+    background-color: var(--app-panel);
+    border-bottom: 1px solid var(--app-border);
+  }
+
+  /* Card */
+  .app-card {
+    background-color: var(--app-panel);
+    border: 1px solid var(--app-border);
+    border-radius: 0.75rem;
+  }
+}
+
+/* ── Global body/html theming ── */
 * {
   margin: 0;
   padding: 0;
@@ -21,51 +104,42 @@ html {
   scroll-behavior: smooth;
 }
 
+html.dark {
+  color-scheme: dark;
+}
+
+* {
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, outline-color 0.2s ease;
+}
+
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: var(--color-bg);
-  color: #1a1a1a;
+  background: var(--app-bg);
+  color: var(--app-text-primary);
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* ── Smooth theme transitions on all major surfaces ── */
+nav, header, aside, main, section, article, div,
+input, textarea, select, button {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 }
 
-::-webkit-scrollbar-track {
-  background: #f1f1f1;
-}
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--app-sidebar); }
+::-webkit-scrollbar-thumb { background: var(--app-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--app-text-muted); }
 
-::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
-}
-
-/* Transitions */
-.transition-fast {
-  transition: all 0.15s ease;
-}
-
-.transition-smooth {
-  transition: all 0.25s ease;
-}
-
-/* Input focus styles */
-input:focus,
-textarea:focus,
-select:focus {
+/* ── Input focus ── */
+input:focus, textarea:focus, select:focus {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.12);
+  box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.15);
 }
 
-/* Tag chips */
+/* ── Tag chips ── */
 .skill-chip {
   display: inline-flex;
   align-items: center;
@@ -79,25 +153,29 @@ select:focus {
   font-weight: 500;
 }
 
-/* Toast animation */
+html.dark .skill-chip {
+  background: rgba(225, 29, 72, 0.15);
+  border-color: rgba(225, 29, 72, 0.3);
+  color: #fda4af;
+}
+
+/* ── Toast animation ── */
 @keyframes slide-in {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
 }
+.toast { animation: slide-in 0.3s ease; }
 
-.toast {
-  animation: slide-in 0.3s ease;
-}
-
-/* CV Paper shadow */
+/* ── CV Paper shadow (always white — not inverted in dark mode) ── */
 .cv-paper {
-  background: white;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  background: white !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
 }
+
+/* ── Dark-mode Tailwind utility helpers ── */
+/* These let us use Tailwind bg-gray-50 etc. as fallbacks
+   while the CSS var system handles theming */
+html.dark .dark\:bg-slate-900  { background-color: #0f172a; }
+html.dark .dark\:bg-slate-800  { background-color: #1e293b; }
+html.dark .dark\:text-slate-100 { color: #e2e8f0; }
+html.dark .dark\:border-slate-700 { border-color: #334155; }

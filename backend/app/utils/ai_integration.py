@@ -32,11 +32,10 @@ else:
 # Keep this list updated with current Groq models
 # Check: https://console.groq.com/docs/models
 GROQ_MODELS = [
-    # "mixtral-8x7b-32k",           # Try this first
-    # "mixtral-8x7b-instruct-v0.1", # Alternative
-    # "mixtral-8x7b-instruct",      # Another alternative
-    # "llama2-70b-4096", 
-    "openai/gpt-oss-120b"                    # Fallback
+    "llama-3.3-70b-versatile",         # Best quality, large context
+    "llama-3.1-8b-instant",            # Fast, reliable free-tier
+    "llama3-8b-8192",                  # Another solid option
+    "gemma2-9b-it",                    # Google Gemma fallback
 ]
 
 # Will be set after first successful call
@@ -495,7 +494,7 @@ def groq_enhance_sections(cv_data: Dict, job_description: str) -> Dict:
         proj_json = _json.dumps(projects[:5],     ensure_ascii=False)
         skills_json = _json.dumps(skills,         ensure_ascii=False)
 
-        # ── Detect language of the CV ─────────────────────────────────────────
+        # ── Detect language from BOTH CV AND job description ─────────────────
         # Sample text from the CV for language detection
         pi = cv_data.get('personalInfo') or cv_data.get('personal_info') or {}
         sample_text = " ".join([
@@ -505,7 +504,10 @@ def groq_enhance_sections(cv_data: Dict, job_description: str) -> Dict:
             str(pi.get('summary') or cv_data.get('summary') or '')[:300],
         ]).lower()
 
-        # Use ONLY unambiguously German words (not prepositions like 'und', 'mit', 'für' that appear in English too)
+        # Also check job description language
+        jd_lower = job_description.lower()
+
+        # Unambiguously German words (not common prepositions)
         german_indicators = [
             "erfahrung", "kenntnisse", "fähigkeiten", "verantwortlich",
             "tätigkeiten", "unternehmen", "entwicklung", "berufserfahrung",
@@ -513,57 +515,63 @@ def groq_enhance_sections(cv_data: Dict, job_description: str) -> Dict:
             "mitarbeiter", "aufgaben", "ausbildung", "studium", "abschluss",
             "deutsch", "englisch", "muttersprache", "bewerber",
             "softwareentwickler", "projektmanager", "werkzeuge", "bildung",
+            # Additional JD-specific German terms
+            "stellenangebot", "stelle", "bewerbung", "bewerber", "einstellung",
+            "vollzeit", "teilzeit", "homeoffice", "gehalt", "vergütung",
+            "anforderungen", "aufgaben", "wir suchen", "wir bieten",
+            "idealerweise", "abgeschlossen", "kenntnisse", "mehrjährige",
+            "teamfähig", "eigenverantwortlich", "analytisch", "kommunikativ",
         ]
-        german_score = sum(1 for w in german_indicators if w in sample_text)
-        language = "German" if german_score >= 2 else "English"
+        cv_german_score = sum(1 for w in german_indicators if w in sample_text)
+        jd_german_score = sum(1 for w in german_indicators if w in jd_lower)
+
+        # German if either CV or JD has enough German signal
+        is_german = (cv_german_score >= 2) or (jd_german_score >= 2)
+        language = "German" if is_german else "English"
 
         if language == "German":
             language_instruction = (
-                "***LANGUAGE REQUIREMENT — HIGHEST PRIORITY***\n"
-                "This CV is in GERMAN. You MUST write EVERY word of your output in German.\n"
-                "Do NOT use English at all — not for descriptions, not for bullet points, not for skills.\n"
-                "All rewritten text must be natural, professional German.\n"
-                "***END LANGUAGE REQUIREMENT***"
+                "***SPRACHE — HÖCHSTE PRIORITÄT***\n"
+                "Dieses Lebenslauf und/oder die Stellenausschreibung ist auf DEUTSCH.\n"
+                "Du MUSST JEDEN TEXT in deiner Ausgabe auf Deutsch schreiben.\n"
+                "Verwende KEIN Englisch — weder in Beschreibungen noch in Stichpunkten noch bei Fähigkeiten.\n"
+                "Schreibe natürliches, professionelles Deutsch für den deutschen Arbeitsmarkt.\n"
+                "Verwende typische deutsche Formulierungen: 'Entwicklung von...', 'Verantwortlich für...', 'Implementierung von...', 'Zusammenarbeit mit...', 'Optimierung von...'.\n"
+                "***ENDE SPRACHANFORDERUNG***"
             )
         else:
             language_instruction = "Write all output text in English."
 
         prompt = f"""{language_instruction}
 
-You are an expert CV writer specialising in ATS optimisation.
+Du bist ein Experte für Lebenslauf-Optimierung und ATS-Systeme (Bewerber-Tracking-Systeme).{'' if language == 'German' else ' You are an expert CV writer specialising in ATS optimisation.'}
 
-TASK: Rewrite *only* the three sections below so the candidate's CV scores higher
-against the Job Description.  Keep the same JSON structure/field names.
+AUFGABE: Schreibe AUSSCHLIESSLICH die drei folgenden Abschnitte neu, damit der Lebenslauf besser zur Stellenausschreibung passt. Behalte dieselbe JSON-Struktur und dieselben Feldnamen bei.{'' if language == 'German' else chr(10) + 'TASK: Rewrite *only* the three sections below so the CV scores higher against the Job Description. Keep the same JSON structure/field names.'}
 
-RULES:
-1. Experiences: rewrite the "description" (or "responsibilities") field for each
-   entry to include relevant keywords, quantified achievements, and action verbs.
-   Do NOT change company, role, dates or any other field.
-2. Projects: rewrite the "description" field to highlight relevant technologies
-   from the JD.  Do NOT change name, link, dates or other fields.
-3. Skills: if skills is a dict of categories keep the same structure and add
-   relevant missing keywords;  if it is a flat list add relevant items.
-   Keep it reasonable (max +5 per category or +8 total for a flat list).
-4. Return ONLY valid JSON — no markdown fences, no extra text.
-{"5. ALL TEXT must be in GERMAN. No English words in descriptions or skills." if language == 'German' else ''}
+REGELN:
+1. Erfahrungen (Experiences): Schreibe das Feld "description" (oder "responsibilities") für jeden Eintrag neu. Füge relevante Schlüsselwörter, messbare Leistungen und Aktionsverben ein. Ändere NICHT company, role, dates oder andere Felder.
+2. Projekte (Projects): Schreibe das Feld "description" neu und betone relevante Technologien aus der Stellenausschreibung. Ändere NICHT name, link, dates oder andere Felder.
+3. Fähigkeiten (Skills): Wenn skills ein Dict mit Kategorien ist, behalte die Struktur bei und füge fehlende Schlüsselwörter hinzu. Bei einer flachen Liste füge relevante Einträge hinzu. Maximum: +5 pro Kategorie oder +8 gesamt.
+4. Gib NUR gültiges JSON zurück — keine Markdown-Umrahmungen, keinen zusätzlichen Text.
+{"5. ALLE TEXTE MÜSSEN AUF DEUTSCH SEIN. Keine englischen Wörter in Beschreibungen oder Fähigkeiten." if language == 'German' else '5. ALL TEXT must be in English.'}
 
-JOB DESCRIPTION:
-{job_description[:1500]}
+STELLENAUSCHREIBUNG / JOB DESCRIPTION:
+{job_description[:1800]}
 
-CURRENT EXPERIENCES (JSON):
+AKTUELLE ERFAHRUNGEN (JSON):
 {exp_json}
 
-CURRENT PROJECTS (JSON):
+AKTUELLE PROJEKTE (JSON):
 {proj_json}
 
-CURRENT SKILLS (JSON):
+AKTUELLE FÄHIGKEITEN (JSON):
 {skills_json}
 
-Return this exact shape:
+Gib exakt dieses Format zurück:
 {{
-  "experiences": [ ...same entries with improved description... ],
-  "projects":    [ ...same entries with improved description... ],
-  "skills":      <same shape as input — dict or list>
+  "experiences": [ ...gleiche Einträge mit verbesserter description... ],
+  "projects":    [ ...gleiche Einträge mit verbesserter description... ],
+  "skills":      <gleiche Struktur wie Eingabe — Dict oder Liste>
 }}"""
 
 
