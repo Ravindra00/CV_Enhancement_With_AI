@@ -25,6 +25,7 @@ jobs:
         working-directory: ./frontend
         env:
           REACT_APP_API_URL: http://${{ secrets.APP_SERVER_IP }}:8000/api
+          CI: false
         run: npm run build
 
       - name: Prepare Temp Directory on Target
