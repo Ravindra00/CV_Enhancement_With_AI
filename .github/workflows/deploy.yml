@@ -59,6 +59,30 @@ jobs:
             sudo mkdir -p /opt/frontend
             sudo cp -r /tmp/frontend-deploy/build/* /opt/frontend/
             sudo chown -R opc:opc /opt/frontend
+            
+            cat << 'PYTHON_SCRIPT' | sudo tee /opt/frontend/server.py
+            import http.server
+            import socketserver
+            import os
+            
+            PORT = 80
+            DIRECTORY = "/opt/frontend"
+            
+            class SPADirectoryHandler(http.server.SimpleHTTPRequestHandler):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, directory=DIRECTORY, **kwargs)
+                    
+                def do_GET(self):
+                    path = self.translate_path(self.path)
+                    if not os.path.exists(path) and not os.path.isfile(path):
+                        self.path = '/index.html'
+                    return super().do_GET()
+            
+            with socketserver.TCPServer(("", PORT), SPADirectoryHandler) as httpd:
+                print(f"Serving at port {PORT}")
+                httpd.serve_forever()
+            PYTHON_SCRIPT
+            
             sudo systemctl restart frontend.service
 
   deploy-backend:
