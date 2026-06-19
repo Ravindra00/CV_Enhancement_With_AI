@@ -6,10 +6,12 @@ import { useDarkMode } from './hooks/useDarkMode';
 // Pages
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
+import VerificationPage from './pages/VerificationPage';
 import DashboardPage from './pages/DashboardPage';
 import CVViewPage from './pages/CVViewPage';
 import CVEditorPage from './pages/CVEditorPage';
 import CVCustomizePage from './pages/CVCustomizePage';
+import CVDesignPage from './pages/CVDesignPage';
 import CoverLetterPage from './pages/CoverLetterPage';
 import CoverLetterViewPage from './pages/CoverLetterViewPage';
 import CoverLetterEditorPage from './pages/CoverLetterEditorPage';
@@ -34,6 +36,7 @@ function App() {
           {/* ==================== PUBLIC ROUTES ==================== */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
+        <Route path="/verify" element={<VerificationPage />} />
 
           {/* ==================== PROTECTED ROUTES ==================== */}
 
@@ -45,6 +48,7 @@ function App() {
           <Route path="/cv/:cvId/edit" element={<ProtectedRoute><CVEditorPage /></ProtectedRoute>} />
           <Route path="/cv-editor/:cvId" element={<ProtectedRoute><CVEditorPage /></ProtectedRoute>} />
           <Route path="/cv/:cvId/customize" element={<ProtectedRoute><CVCustomizePage /></ProtectedRoute>} />
+          <Route path="/cv/:cvId/design" element={<ProtectedRoute><CVDesignPage /></ProtectedRoute>} />
           <Route path="/cv-customize/:cvId" element={<ProtectedRoute><CVCustomizePage /></ProtectedRoute>} />
 
           {/* ===== COVER LETTER ROUTES ===== */}

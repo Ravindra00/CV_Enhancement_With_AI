@@ -18,14 +18,14 @@ const SignupPage = () => {
     if (formData.password !== formData.confirmPassword) { setError('Passwords do not match'); return; }
     setLoading(true);
     try {
-      const response = await authAPI.signup({ name: formData.name, email: formData.email, password: formData.password });
-      const { user, access_token } = response.data;
-      login(user, access_token);
-      navigate('/dashboard');
+      await authAPI.signup({ name: formData.name, email: formData.email, password: formData.password });
+      navigate(`/verify?email=${encodeURIComponent(formData.email)}`);
     } catch (err) {
       setError(err.response?.data?.detail || 'Signup failed');
     } finally { setLoading(false); }
   };
+
+
 
   return (
     <div className="min-h-screen flex">

@@ -1,0 +1,27 @@
+# =============================================================================
+# ANTIGRAVITY — terraform.tfvars
+# Pre-filled from your OCI config. Do NOT commit to GitHub.
+# =============================================================================
+
+# ── OCI Auth ──────────────────────────────────────────────────────────────────
+tenancy_ocid     = "ocid1.tenancy.oc1..aaaaaaaab2opxx6mrmmikviqgfvfszer32pjqht53ybzlxruxtp2hth45poq"
+user_ocid        = "ocid1.user.oc1..aaaaaaaabreadmm45ntreqcs27coj5bz5bmr24b3k3ohhg6xirm625lapqfa"
+fingerprint      = "d9:6c:49:52:ed:0a:e7:d8:93:84:15:4f:bd:a2:48:bd"
+private_key_path = "~/.oci/oci_api_key.pem"
+region           = "eu-frankfurt-1"
+
+# ── Compartment (using root/tenancy compartment) ──────────────────────────────
+compartment_ocid = "ocid1.tenancy.oc1..aaaaaaaab2opxx6mrmmikviqgfvfszer32pjqht53ybzlxruxtp2hth45poq"
+
+# ── Project ───────────────────────────────────────────────────────────────────
+project_name = "antigravity"
+environment  = "production"
+
+# ── Networking ────────────────────────────────────────────────────────────────
+vcn_cidr            = "10.0.0.0/16"
+public_subnet_cidr  = "10.0.1.0/24"
+private_subnet_cidr = "10.0.2.0/24"
+db_subnet_cidr      = "10.0.3.0/24"
+
+# ── Auto-filled by bootstrap.sh (do not edit manually) ───────────────────────
+# my_ip, ssh_public_key, db_admin_password are injected by bootstrap.sh

@@ -9,8 +9,12 @@ Falls back to rule-based keyword analysis if no API key is set.
 import os
 import re
 import json
+from app.config_store import get_config
 import logging
 from typing import Dict, Any, List, Optional, Tuple
+import litellm
+from app.utils.ai_integration import get_ai_config
+
 
 logger = logging.getLogger(__name__)
 
@@ -155,14 +159,12 @@ def generate_enhanced_experience_for_suggestion(
     Returns:
         Enhanced experience object or None if Groq unavailable
     """
-    api_key = os.getenv("GROQ_API_KEY", "").strip()
-    if not api_key:
-        logger.info("GROQ_API_KEY not set — cannot generate enhanced content")
+    ai_config = get_ai_config()
+    if not ai_config:
+        logger.info("AI config not set — cannot generate enhanced content")
         return None
     
     try:
-        from groq import Groq
-        client = Groq(api_key=api_key)
         
         # Build current experience summary
         current_desc = experience.get('description', '')
@@ -170,7 +172,14 @@ def generate_enhanced_experience_for_suggestion(
         current_company = experience.get('company', 'Unknown')
         
         # Prompt to generate enhanced content
-        prompt = f"""You are an expert CV writer. Rewrite this experience entry to better match the job requirements.
+        default_exp_prompt = """***LANGUAGE PRIORITY***
+Analyze the language of the TARGET JOB REQUIREMENTS.
+You MUST write the rewritten experience in the EXACT SAME LANGUAGE as the Job Description.
+***END***
+
+You are an expert CV writer. Rewrite this experience entry to better match the job requirements."""
+        base_prompt = get_config('cv_experience_prompt', default_exp_prompt)
+        prompt = f"""{base_prompt}
 
 CURRENT EXPERIENCE:
 Role: {current_role}
@@ -193,8 +202,9 @@ TASK: Rewrite the experience description to:
 Return ONLY the improved description text (3-5 bullet points). Start each line with a bullet (•):
 """
 
-        response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+        response = litellm.completion(
+            model=ai_config["model"],
+            api_key=ai_config["api_key"],
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             max_tokens=800,
@@ -219,7 +229,7 @@ Return ONLY the improved description text (3-5 bullet points). Start each line w
 
 
 # ── Groq AI suggestions (FIXED: Now includes suggestion_data)
-def groq_suggestions(cv_data: Dict[str, Any], job_desc: str, missing: List[str], score: int) -> Optional[List[Dict]]:
+def ai_suggestions(cv_data: Dict[str, Any], job_desc: str, missing: List[str], score: int) -> Optional[List[Dict]]:
     """
     Uses Groq's free API with Llama-3.1-8B-Instant to generate contextual,
     specific CV improvement suggestions tailored to the job description.
@@ -228,14 +238,12 @@ def groq_suggestions(cv_data: Dict[str, Any], job_desc: str, missing: List[str],
     
     Returns None if Groq is unavailable or not configured.
     """
-    api_key = os.getenv("GROQ_API_KEY", "").strip()
-    if not api_key:
-        logger.info("GROQ_API_KEY not set — skipping AI suggestions")
+    ai_config = get_ai_config()
+    if not ai_config:
+        logger.info("AI config not set — skipping AI suggestions")
         return None
 
     try:
-        from groq import Groq
-        client = Groq(api_key=api_key)
 
         # Support both camelCase and snake_case CV data formats
         pi = cv_data.get('personalInfo') or cv_data.get('personal_info') or {}
@@ -255,37 +263,13 @@ Summary exists: {'Yes' if cv_data.get('summary') or cv_data.get('profile_summary
 Keyword match score: {score}/100
 Missing keywords: {', '.join(missing[:10])}"""
 
-        # Detect language from both the CV and the job description
-        sample_text = " ".join([
-            json.dumps(exps[:3], ensure_ascii=False)[:500],
-            json.dumps(skills[:20], ensure_ascii=False)[:200],
-            str(cv_data.get('summary') or cv_data.get('profile_summary') or '')[:300],
-        ]).lower()
-        jd_lower = job_desc.lower()
-        german_indicators = [
-            'erfahrung', 'kenntnisse', 'fähigkeiten', 'entwicklung',
-            'verantwortlich', 'unternehmen', 'aufgaben', 'tätigkeiten',
-            'leitung', 'planung', 'umsetzung', 'berufserfahrung',
-            'studium', 'abschluss', 'ausbildung', 'weiterbildung',
-            'deutsch', 'englisch', 'muttersprache', 'bewerber',
-            'softwareentwickler', 'projektmanager', 'datenbankadministrator',
-            'werkzeuge', 'projekte', 'sprachen', 'bildung',
-            # JD-specific German words
-            'stellenangebot', 'stelle', 'bewerbung', 'einstellung',
-            'vollzeit', 'teilzeit', 'homeoffice', 'gehalt', 'vergütung',
-            'anforderungen', 'wir suchen', 'wir bieten', 'idealerweise',
-            'abgeschlossen', 'mehrjährige', 'teamfähig', 'eigenverantwortlich',
-        ]
-        cv_german_score = sum(1 for w in german_indicators if w in sample_text)
-        jd_german_score = sum(1 for w in german_indicators if w in jd_lower)
-        is_german = (cv_german_score >= 2) or (jd_german_score >= 2)
+        # Dynamic language instruction based on Job Description
         lang_note = (
-            "***SPRACHE — HÖCHSTE PRIORITÄT***\n"
-            "Dieser Lebenslauf und/oder die Stellenausschreibung ist auf DEUTSCH.\n"
-            "Schreibe ALLE Vorschläge, Beschreibungen und Beispiele auf Deutsch.\n"
-            "Verwende KEIN Englisch unter keinen Umständen.\n"
-            "***ENDE***\n\n"
-            if is_german else ""
+            "***LANGUAGE PRIORITY***\n"
+            "Analyze the language of the TARGET JOB REQUIREMENTS (e.g. English, German, French, Spanish, etc).\n"
+            "You MUST write ALL suggestions, descriptions, and examples in the EXACT SAME LANGUAGE as the Job Description.\n"
+            "Do NOT default to English if the job description is in another language.\n"
+            "***END***\n\n"
         )
 
         prompt = f"""{lang_note}You are an expert CV coach helping a candidate tailor their CV for a specific job.
@@ -312,8 +296,9 @@ Return ONLY a JSON array with this exact structure (no extra text):
   }}
 ]"""
 
-        chat = client.chat.completions.create(
-            model="llama-3.1-8b-instant",   # Free tier model on Groq
+        chat = litellm.completion(
+            model=ai_config["model"],
+            api_key=ai_config["api_key"],
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
             max_tokens=1500,
@@ -381,7 +366,7 @@ def generate_suggestions(cv_data: Dict[str, Any], job_description: str) -> Dict[
     score, matched, missing = compute_match_score(cv_keywords, jd_keywords)
 
     # 3. Try AI-powered suggestions first, fall back to rule-based
-    ai_suggestions = groq_suggestions(cv_data, job_description, missing, score)
+    ai_suggestions = ai_suggestions(cv_data, job_description, missing, score)
     ai_powered = ai_suggestions is not None
 
     # Merge: AI suggestions first, then add any rule-based that don't duplicate

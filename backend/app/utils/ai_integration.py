@@ -1,10 +1,8 @@
+from app.config_store import get_config
 """
 AI Integration Module
 Handles LLM API calls for CV enhancement and cover letter generation
-Uses Groq API SDK (free tier available)
-
-Note: Groq frequently deprecates models. This version tries multiple models
-in order until one works, so it stays current automatically.
+Uses litellm to support any model dynamically (OpenAI, Groq, Anthropic, Ollama, etc.)
 """
 
 import os
@@ -16,79 +14,47 @@ from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
 
-# ✅ Initialize Groq client
-from groq import Groq
+import litellm
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-if not GROQ_API_KEY:
-    print("⚠️  WARNING: GROQ_API_KEY not set! AI features will not work.")
-    client = None
-else:
-    print("✅ GROQ_API_KEY loaded")
-    client = Groq(api_key=GROQ_API_KEY)
-
-# ✅ Models to try (in order of preference)
-# Keep this list updated with current Groq models
-# Check: https://console.groq.com/docs/models
-GROQ_MODELS = [
-    "llama-3.3-70b-versatile",         # Best quality, large context
-    "llama-3.1-8b-instant",            # Fast, reliable free-tier
-    "llama3-8b-8192",                  # Another solid option
-    "gemma2-9b-it",                    # Google Gemma fallback
-]
-
-# Will be set after first successful call
-WORKING_MODEL = None
-
-
-def _get_working_model():
-    """
-    Get a working model by trying each one in the list.
-    Caches the result so we don't keep trying bad models.
-    """
-    global WORKING_MODEL
+def get_ai_config():
+    from app.config_store import get_config
     
-    # If we already found a working model, use it
-    if WORKING_MODEL:
-        return WORKING_MODEL
+    # 1. Check if generic AI_MODEL is set
+    model_type = get_config('ai_model_type', os.getenv("AI_MODEL_TYPE", "")).strip().lower()
+    api_key = get_config('ai_api_key', os.getenv("AI_API_KEY", "")).strip()
     
-    # If no client, we can't test
-    if not client:
-        print("⚠️  No Groq client available")
-        return None
+    # 2. Check if specific AI_MODEL is set, otherwise default based on type
+    model = get_config('ai_model', os.getenv("AI_MODEL", "")).strip()
     
-    print("🔍 Testing available Groq models...")
-    
-    # Try each model
-    for model in GROQ_MODELS:
-        try:
-            print(f"   Trying {model}...", end=" ")
-            
-            # Quick test with minimal request
-            response = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": "Hi"}],
-                max_tokens=10,
-                temperature=0.7
-            )
-            
-            # If we got here, the model works!
-            print("✅ Works!")
-            WORKING_MODEL = model
-            return model
-            
-        except Exception as e:
-            error_msg = str(e)
-            if "decommissioned" in error_msg.lower():
-                print("❌ Decommissioned")
-            elif "does not exist" in error_msg.lower():
-                print("❌ Doesn't exist")
+    if not model:
+        if model_type == 'openai':
+            model = 'gpt-4o-mini' # Default openai model
+        elif model_type == 'anthropic':
+            model = 'claude-3-haiku-20240307'
+        else:
+            model = ''
+
+    if model and api_key:
+        # LiteLLM format requires provider/model or just model if standard
+        if model_type and model_type not in model and '/' not in model:
+            if model_type == 'openai':
+                pass # openai is default
             else:
-                print(f"❌ Error: {error_msg[:50]}")
-            continue
-    
-    print("❌ No working models found! Using fallback template.")
+                model = f"{model_type}/{model}"
+        return {
+            "model": model,
+            "api_key": api_key
+        }
+        
+    # 3. Fallback to Groq
+    groq_key = get_config('groq_api_key', os.getenv("GROQ_API_KEY", "")).strip()
+    if groq_key:
+        return {
+            "model": "groq/llama-3.1-8b-instant",
+            "api_key": groq_key
+        }
+        
+    print("⚠️  WARNING: No AI API keys set! AI features will not work.")
     return None
 
 
@@ -96,16 +62,16 @@ def _get_working_model():
 # COVER LETTER GENERATION
 # ============================================================================
 
-def generate_cover_letter(cv_data: dict, job_description: str, user_name: str = "User") -> str:
+def generate_cover_letter(cv_data: dict, job_description: str, user_name: str = "User", language: str = "auto") -> str:
     """
     Generate a professional cover letter using Groq API.
     Returns plain text string (not JSON object).
-    Language of the cover letter matches the language of the job description.
     
     Args:
         cv_data: Dictionary containing CV information
         job_description: Job description text
         user_name: Name of the person
+        language: Language override — 'auto', 'Deutsch', 'English', 'French', 'Spanish'
     
     Returns:
         Plain text cover letter string
@@ -115,22 +81,49 @@ def generate_cover_letter(cv_data: dict, job_description: str, user_name: str = 
         print(f"🤖 [generate_cover_letter] Starting...")
         print(f"{'='*70}")
         
-        # ✅ Check if client is initialized
-        if not client:
-            print("⚠️  Groq client not initialized, using fallback")
+        # Get AI Config
+        ai_config = get_ai_config()
+        if not ai_config:
+            print("⚠️  No AI config available, using fallback")
             return _generate_fallback_cover_letter(user_name, job_description)
+            
+        model = ai_config["model"]
+        api_key = ai_config["api_key"]
         
-        # Get a working model
-        model = _get_working_model()
-        if not model:
-            print("⚠️  No working Groq model available, using fallback")
-            return _generate_fallback_cover_letter(user_name, job_description)
-        
-        # Detect language from job description
-        from app.utils.language_detect import detect_language, get_language_name
-        language_code = detect_language(job_description)
-        language_name = get_language_name(language_code)
-        print(f"   Language detected: {language_name} ({language_code})")
+        # Resolve language: explicit override or auto-detect
+        _LANG_MAP = {
+            'Deutsch': 'de',
+            'deutsch': 'de',
+            'german': 'de',
+            'English': 'en',
+            'english': 'en',
+            'French': 'fr',
+            'french': 'fr',
+            'Spanish': 'es',
+            'spanish': 'es',
+        }
+        if language and language.lower() not in ('auto', 'auto-detect', ''):
+            language_code = _LANG_MAP.get(language, language[:2].lower())
+            language_name = language
+            print(f"   Language override: {language_name} ({language_code})")
+        else:
+            from app.utils.language_detect import detect_language, get_language_name
+            language_code = detect_language(job_description)
+            language_name = get_language_name(language_code)
+            print(f"   Language detected: {language_name} ({language_code})")
+
+        # Inject mandatory language instruction into each prompt
+        _lang_instruction = ''
+        if language_code == 'de':
+            _lang_instruction = 'Write the cover letter in German (Deutsch). Do not use any other language.'
+        elif language_code == 'fr':
+            _lang_instruction = 'Write the cover letter in French (Français). Do not use any other language.'
+        elif language_code == 'es':
+            _lang_instruction = 'Write the cover letter in Spanish (Español). Do not use any other language.'
+        elif language_code == 'en':
+            _lang_instruction = 'Write the cover letter in English. Do not use any other language.'
+        else:
+            _lang_instruction = f'Write the cover letter in {language_name}. Do not use any other language.'
         
         # Build CV summary
         name = cv_data.get('full_name', user_name)
@@ -171,7 +164,7 @@ def generate_cover_letter(cv_data: dict, job_description: str, user_name: str = 
         print(f"   Experience: {experience_text}")
         
         # Language-specific prompts
-        language_prompts = {
+        language_prompts = {  # noqa: these are kept for fallback
             'de': f"""Du bist ein professioneller Bewerbungsschreiber. 
 
 Schreibe ein professionelles und überzeugendes Anschreiben basierend auf diesen Informationen:
@@ -288,8 +281,10 @@ Escreva uma carta de apresentação profissional que:
 Retorne APENAS o texto da carta, sem cabeçalhos ou metadados. Comece diretamente com "Prezado Senhor/Senhora," ou similar.""",
         }
         
-        # Use language-specific prompt if available, otherwise English
-        prompt = language_prompts.get(language_code, f"""You are a professional cover letter writer. 
+        # Build unified prompt with explicit language instruction
+        prompt = f"""{_lang_instruction}
+
+You are a professional cover letter writer.
 
 Generate a professional, compelling cover letter based on this information:
 
@@ -302,23 +297,27 @@ Generate a professional, compelling cover letter based on this information:
 **Job Description:**
 {job_description}
 
-Write a professional cover letter that:
-1. Opens with a strong hook
-2. Highlights relevant skills that match the job
-3. Shows enthusiasm for the role
-4. Closes with a call to action
-5. Is 3-4 paragraphs long
-6. Uses professional but personable tone
+Write a FULL, properly formatted formal cover letter that:
+1. Includes a formal header (Sender's placeholder address, Date, Recipient's placeholder address).
+2. Uses a proper formal salutation (e.g., "Dear Hiring Manager,").
+3. Opens with a strong hook in the first paragraph.
+4. Highlights relevant skills that match the job in the body paragraphs.
+5. Shows enthusiasm for the role and closes with a call to action in the final paragraph.
+6. Ends with a formal sign-off (e.g., "Sincerely, {name}").
+7. Is at least 3 to 4 distinct paragraphs long (make sure to separate paragraphs with blank lines).
 
-Return ONLY the cover letter text, no headers or metadata. Start directly with "Dear Hiring Manager," or similar.""")
+{_lang_instruction}
+
+Return the complete, properly formatted cover letter text. Do not wrap it in markdown blocks or output anything else."""
 
         print(f"\n📤 Sending to Groq API...")
         print(f"   Model: {model}")
         print(f"   Max tokens: 1000")
         
-        # ✅ Call Groq API using SDK
-        response = client.chat.completions.create(
+        # ✅ Call API using litellm
+        response = litellm.completion(
             model=model,
+            api_key=api_key,
             messages=[
                 {"role": "user", "content": prompt}
             ],
@@ -359,9 +358,19 @@ def _generate_fallback_cover_letter(name: str, job_description: str) -> str:
     Generate a basic cover letter template when AI is unavailable.
     Returns plain text string.
     """
+    from datetime import datetime
     date = datetime.now().strftime("%B %d, %Y")
     
-    fallback = f"""{date}
+    fallback = f"""[Your Name]
+[Your Address]
+[Your Phone]
+[Your Email]
+
+{date}
+
+Hiring Manager
+[Company Name]
+[Company Address]
 
 Dear Hiring Manager,
 
@@ -372,6 +381,7 @@ My experience has equipped me with a deep understanding of the key responsibilit
 I would welcome the opportunity to discuss how my background, skills, and enthusiasm align with your team's needs. Thank you for considering my application, and I look forward to hearing from you.
 
 Sincerely,
+
 {name}
 """
     
@@ -494,20 +504,16 @@ def analyze_cv(cv_data: Dict) -> Dict:
     try:
         print(f"\n🔍 [analyze_cv] Starting...")
         
-        if not client:
-            print("⚠️  Groq client not initialized")
+        ai_config = get_ai_config()
+        if not ai_config:
+            print("⚠️  No AI config available")
             return {
                 'analysis': {'strengths': ['Profile complete'], 'improvements': [], 'score': 60},
                 'status': 'api_error'
             }
-        
-        model = _get_working_model()
-        if not model:
-            return {
-                'analysis': {'strengths': ['Profile complete'], 'improvements': [], 'score': 60},
-                'status': 'api_error'
-            }
-        
+        model = ai_config["model"]
+        api_key = ai_config["api_key"]
+
         personal_info = cv_data.get('personal_info', {})
         experiences = cv_data.get('experiences', [])
         educations = cv_data.get('educations', [])
@@ -539,8 +545,9 @@ Respond with ONLY valid JSON, no other text:
         
         print(f"📤 Sending to Groq API...")
         
-        response = client.chat.completions.create(
+        response = litellm.completion(
             model=model,
+            api_key=api_key,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=500,
             temperature=0.7
@@ -600,13 +607,15 @@ def groq_enhance_sections(cv_data: Dict, job_description: str) -> Dict:
     try:
         print(f"\n✨ [groq_enhance_sections] Starting...")
 
-        if not client:
-            print("⚠️  Groq client not initialized")
-            return {"enhanced_cv": cv_data, "status": "api_error"}
-
-        model = _get_working_model()
-        if not model:
-            return {"enhanced_cv": cv_data, "status": "api_error"}
+        ai_config = get_ai_config()
+        if not ai_config:
+            print("⚠️  No AI config available")
+            return {
+                'analysis': {'strengths': ['Profile complete'], 'improvements': [], 'score': 60},
+                'status': 'api_error'
+            }
+        model = ai_config["model"]
+        api_key = ai_config["api_key"]
 
         experiences = cv_data.get("experiences", []) or []
         projects    = cv_data.get("projects",    []) or []
@@ -702,11 +711,12 @@ Gib exakt dieses Format zurück:
 
         print(f"📤 Sending enhance request to Groq (model: {model})...")
 
-        response = client.chat.completions.create(
+        response = litellm.completion(
             model=model,
+            api_key=api_key,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=2000,
-            temperature=0.6,
+            max_tokens=3000,
+            temperature=0.7
         )
 
         if not (response.choices and len(response.choices) > 0):
@@ -837,13 +847,15 @@ def enhance_cv_for_job(cv_data: Dict, job_description: str) -> Dict:
     try:
         print(f"\n✨ [enhance_cv_for_job] Starting...")
         
-        if not client:
-            print("⚠️  Groq client not initialized")
-            return {'enhanced_cv': cv_data, 'status': 'api_error'}
-        
-        model = _get_working_model()
-        if not model:
-            return {'enhanced_cv': cv_data, 'status': 'api_error'}
+        ai_config = get_ai_config()
+        if not ai_config:
+            print("⚠️  No AI config available")
+            return {
+                'analysis': {'strengths': ['Profile complete'], 'improvements': [], 'score': 60},
+                'status': 'api_error'
+            }
+        model = ai_config["model"]
+        api_key = ai_config["api_key"]
         
         experiences = cv_data.get('experiences', [])
         
@@ -869,10 +881,11 @@ Return ONLY JSON, no other text:
         
         print(f"📤 Sending to Groq API...")
         
-        response = client.chat.completions.create(
+        response = litellm.completion(
             model=model,
+            api_key=api_key,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1000,
+            max_tokens=2000,
             temperature=0.7
         )
         
@@ -904,3 +917,429 @@ Return ONLY JSON, no other text:
     except Exception as e:
         print(f"❌ ERROR in enhance_cv_for_job: {str(e)}")
         return {'enhanced_cv': cv_data, 'status': 'error', 'error': str(e)}
+
+
+# ============================================================================
+# AI JOB TAILORING — Section-by-section with before/after diffs
+# ============================================================================
+
+def tailor_cv_sections(cv_data: Dict, job_description: str, sections: List[str]) -> Dict:
+    """
+    Tailor selected CV sections to match a job description.
+    Returns before/after diffs so the user can accept/reject per field.
+
+    Args:
+        cv_data:         Full CV data dict (frontend format)
+        job_description: Job description text
+        sections:        List of section keys to tailor, e.g. ['experiences', 'summary', 'skills']
+                         Pass ['all'] to tailor all sections.
+
+    Returns:
+        {
+          "status": "success" | "error",
+          "diffs": {
+            "experiences": [{ "index": 0, "field": "description", "before": "...", "after": "..." }, ...],
+            "summary":     [{ "field": "summary", "before": "...", "after": "..." }],
+            "skills":      [{ "field": "skills", "before": [...], "after": [...] }],
+          }
+        }
+    """
+    try:
+        print(f"\n🎯 [tailor_cv_sections] sections={sections}")
+
+        ai_config = get_ai_config()
+        if not ai_config:
+            print("⚠️  No AI config available")
+            return {"tailored_cv": cv_data, "diffs": {}, "status": "api_error", "error": "No working model"}
+            
+        model = ai_config["model"]
+        api_key = ai_config["api_key"]
+
+        import json as _json
+
+        ALL_SECTIONS = ['experiences', 'summary', 'skills']
+        target = ALL_SECTIONS if ('all' in sections or not sections) else [s for s in sections if s in ALL_SECTIONS]
+
+        diffs = {}
+
+        experiences = cv_data.get('experiences', []) or []
+        skills = cv_data.get('skills', []) or []
+        summary = (cv_data.get('personal_info') or {}).get('summary', '') or cv_data.get('profile_summary', '') or ''
+
+        # ── Build compact snapshot for prompt ────────────────────────────────
+        exp_json = _json.dumps(
+            [{'index': i, 'role': e.get('role') or e.get('position', ''),
+              'company': e.get('company', ''), 'description': e.get('description', '')}
+             for i, e in enumerate(experiences[:5])],
+            ensure_ascii=False
+        )
+        skill_names = [s if isinstance(s, str) else s.get('name', '') for s in skills]
+        skills_json = _json.dumps(skill_names, ensure_ascii=False)
+
+        # ── Single consolidated prompt ────────────────────────────────────────
+        sections_prompt_parts = []
+        if 'experiences' in target:
+            sections_prompt_parts.append(f'EXPERIENCES (JSON):\n{exp_json}')
+        if 'summary' in target:
+            sections_prompt_parts.append(f'PROFILE SUMMARY:\n{summary}')
+        if 'skills' in target:
+            sections_prompt_parts.append(f'SKILLS (JSON array of names):\n{skills_json}')
+
+        default_sys_msg = """***LANGUAGE PRIORITY***
+Analyze the language of the TARGET JOB REQUIREMENTS.
+You MUST write ALL revisions in the EXACT SAME LANGUAGE as the Job Description.
+Do NOT default to English if the job description is in another language.
+***END***
+
+You are a professional CV editor. Rewrite ONLY the selected sections to better match the job description. Keep all facts truthful — do NOT invent experience or skills. Output ONLY valid JSON matching the schema described. No markdown fences."""
+        system_msg = get_config('cv_tailor_prompt', default_sys_msg)
+
+        schema_desc = "{"
+        if 'experiences' in target:
+            schema_desc += '"experiences": [{"index": <int>, "description": "<improved text>"}],'
+        if 'summary' in target:
+            schema_desc += '"summary": "<improved summary text>",'
+        if 'skills' in target:
+            schema_desc += '"skills": ["skill1", "skill2", ...],'
+        schema_desc = schema_desc.rstrip(',') + "}"
+
+        user_msg = (
+            f"Job Description:\n{job_description[:1800]}\n\n"
+            + "\n\n".join(sections_prompt_parts)
+            + f"\n\nReturn ONLY this JSON schema (fill in the improved values):\n{schema_desc}"
+        )
+
+        print(f"📤 Sending tailor request to Groq (model={model})...")
+        response = litellm.completion(
+            model=model,
+            api_key=api_key,
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg}
+            ],
+            max_tokens=3000,
+            temperature=0.7
+        )
+
+        if not (response.choices and response.choices[0].message.content):
+            return {"status": "api_error", "diffs": {}, "error": "Empty response from AI"}
+
+        raw = response.choices[0].message.content.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+
+        # Parse JSON
+        result = None
+        try:
+            result = _json.loads(raw)
+        except _json.JSONDecodeError:
+            m = __import__('re').search(r'\{.*\}', raw, __import__('re').DOTALL)
+            if m:
+                try:
+                    result = _json.loads(m.group())
+                except Exception:
+                    pass
+
+        if not result or not isinstance(result, dict):
+            return {"status": "parse_error", "diffs": {}, "error": "Could not parse AI response"}
+
+        # ── Build diffs ──────────────────────────────────────────────────────
+        if 'experiences' in target and 'experiences' in result:
+            exp_diffs = []
+            for item in result['experiences']:
+                idx = item.get('index', 0)
+                if idx < len(experiences):
+                    before = experiences[idx].get('description', '')
+                    after  = item.get('description', before)
+                    if after and after != before:
+                        exp_diffs.append({
+                            'index': idx,
+                            'field': 'description',
+                            'label': f"{experiences[idx].get('role') or experiences[idx].get('position', '')} @ {experiences[idx].get('company', '')}",
+                            'before': before,
+                            'after': after,
+                        })
+            diffs['experiences'] = exp_diffs
+
+        if 'summary' in target and 'summary' in result:
+            before_s = summary
+            after_s = result.get('summary', summary)
+            if after_s and after_s != before_s:
+                diffs['summary'] = [{'field': 'summary', 'label': 'Profile Summary', 'before': before_s, 'after': after_s}]
+
+        if 'skills' in target and 'skills' in result:
+            new_skills = result.get('skills', skill_names)
+            if isinstance(new_skills, list) and new_skills != skill_names:
+                diffs['skills'] = [{
+                    'field': 'skills',
+                    'label': 'Skills',
+                    'before': skill_names,
+                    'after': new_skills,
+                }]
+
+        print(f"✅ Tailor complete. Diffs: {list(diffs.keys())}")
+        return {"status": "success", "diffs": diffs}
+
+    except Exception as e:
+        print(f"❌ ERROR in tailor_cv_sections: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {"status": "error", "diffs": {}, "error": str(e)}
+
+
+# ============================================================================
+# CV LANGUAGE TRANSLATION — translate all text fields into target language
+# ============================================================================
+
+_LANG_FULL = {
+    'Deutsch':  'German',
+    'English':  'English',
+    'French':   'French',
+    'Spanish':  'Spanish',
+    'Italian':  'Italian',
+    'Portuguese': 'Portuguese',
+}
+
+
+def translate_cv(cv_data: Dict, target_language: str) -> Dict:
+    """
+    Translate all text content of a CV into target_language.
+    Preserves names, dates, URLs, emails, phone numbers, and structure.
+
+    Args:
+        cv_data:         Full CV data dict
+        target_language: e.g. 'Deutsch', 'English', 'French', 'Spanish'
+
+    Returns:
+        { "status": "success"|"error", "translated_cv": <full translated cv_data> }
+    """
+    import json as _json
+    import copy
+
+    try:
+        print(f"\n🌐 [translate_cv] target_language={target_language}")
+
+        ai_config = get_ai_config()
+        if not ai_config:
+            print("⚠️  No AI config available")
+            return {
+                'analysis': {'strengths': ['Profile complete'], 'improvements': [], 'score': 60},
+                'status': 'api_error'
+            }
+        model = ai_config["model"]
+        api_key = ai_config["api_key"]
+
+        lang_full = _LANG_FULL.get(target_language, target_language)
+
+        # Build the fields to translate as a compact JSON payload
+        pi = cv_data.get('personal_info') or cv_data.get('personalInfo') or {}
+        experiences = cv_data.get('experiences') or cv_data.get('experience') or []
+        education   = cv_data.get('educations') or cv_data.get('education') or []
+        skills      = cv_data.get('skills') or []
+        certs       = cv_data.get('certifications') or []
+        custom_secs = cv_data.get('custom_sections') or []
+        summary     = pi.get('summary') or cv_data.get('profile_summary') or cv_data.get('summary') or ''
+        job_title   = pi.get('title') or pi.get('jobTitle') or cv_data.get('title') or ''
+
+        payload = {
+            "summary": summary,
+            "job_title": job_title,
+            "experiences": [
+                {"index": i, "role": e.get('role',''), "company": e.get('company',''),
+                 "description": e.get('description','')}
+                for i, e in enumerate(experiences)
+            ],
+            "education": [
+                {"index": i, "degree": e.get('degree',''), "field": e.get('field','')}
+                for i, e in enumerate(education)
+            ],
+            "skills": [
+                s if isinstance(s, str) else s.get('name','') for s in skills
+            ],
+            "certifications": [
+                {"index": i, "name": c.get('name',''), "issuer": c.get('issuer','')}
+                for i, c in enumerate(certs)
+            ],
+            "custom_sections": [
+                {"index": i, "title": cs.get('title',''),
+                 "items": cs.get('items',[]), "content": cs.get('content','')}
+                for i, cs in enumerate(custom_secs)
+            ],
+        }
+
+        system_msg = (
+            f"You are a professional CV translator. "
+            f"Translate ALL text fields into {lang_full}. "
+            f"Rules:\n"
+            f"- Preserve proper nouns: person names, company names, city/country names, institution names.\n"
+            f"- Preserve all dates, URLs, emails, phone numbers exactly as-is.\n"
+            f"- Do NOT add or remove any information.\n"
+            f"- Professional job titles should use standard {lang_full} equivalents (e.g. 'Software Engineer' → 'Softwareentwickler' in German).\n"
+            f"- Return ONLY valid JSON with the exact same keys. No markdown, no extra text."
+        )
+
+        user_msg = (
+            f"Translate this CV data into {lang_full}. "
+            f"Return the same JSON structure with translated text values:\n\n"
+            f"{_json.dumps(payload, ensure_ascii=False)}"
+        )
+
+        print(f"📤 Sending translate request to Groq (model={model})...")
+        response = litellm.completion(
+            model=model,
+            api_key=api_key,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=500,
+            temperature=0.7
+        )
+
+        if not (response.choices and response.choices[0].message.content):
+            return {"status": "error", "error": "Empty response", "translated_cv": cv_data}
+
+        raw = response.choices[0].message.content.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+
+        try:
+            translated = _json.loads(raw)
+        except _json.JSONDecodeError:
+            m = __import__('re').search(r'\{.*\}', raw, __import__('re').DOTALL)
+            if m:
+                try:
+                    translated = _json.loads(m.group())
+                except Exception:
+                    return {"status": "parse_error", "error": "Could not parse response", "translated_cv": cv_data}
+            else:
+                return {"status": "parse_error", "error": "No JSON in response", "translated_cv": cv_data}
+
+        # Merge translated fields back into a deep copy of cv_data
+        result = copy.deepcopy(cv_data)
+
+        # personal_info
+        pi_out = result.get('personal_info') or result.get('personalInfo') or {}
+        if translated.get('summary'):
+            pi_out['summary'] = translated['summary']
+            result['profile_summary'] = translated['summary']
+            result['summary'] = translated['summary']
+        if translated.get('job_title'):
+            pi_out['title'] = translated['job_title']
+            pi_out['jobTitle'] = translated['job_title']
+            result['title'] = translated['job_title']
+        if 'personal_info' in result:
+            result['personal_info'] = pi_out
+        if 'personalInfo' in result:
+            result['personalInfo'] = pi_out
+
+        # experiences
+        t_exps = {e['index']: e for e in (translated.get('experiences') or [])}
+        exps = list(result.get('experiences') or result.get('experience') or [])
+        for i, exp in enumerate(exps):
+            if i in t_exps:
+                te = t_exps[i]
+                if te.get('role'):      exp['role'] = te['role']
+                if te.get('description'): exp['description'] = te['description']
+        if 'experiences' in result:
+            result['experiences'] = exps
+        if 'experience' in result:
+            result['experience'] = exps
+
+        # education
+        t_edu = {e['index']: e for e in (translated.get('education') or [])}
+        edus = list(result.get('educations') or result.get('education') or [])
+        for i, edu in enumerate(edus):
+            if i in t_edu:
+                te = t_edu[i]
+                if te.get('degree'): edu['degree'] = te['degree']
+                if te.get('field'):  edu['field']  = te['field']
+        if 'educations' in result:
+            result['educations'] = edus
+        if 'education' in result:
+            result['education'] = edus
+
+        # skills — translate names only, preserve category
+        t_skills = translated.get('skills') or []
+        orig_skills = result.get('skills') or []
+        if t_skills and len(t_skills) == len(orig_skills):
+            for i, sk in enumerate(orig_skills):
+                if isinstance(sk, dict):
+                    sk['name'] = t_skills[i]
+                # string skills stay as-is (rare)
+        elif t_skills:
+            # Best-effort: rebuild list preserving category if possible
+            new_skills = []
+            for i, name in enumerate(t_skills):
+                if i < len(orig_skills) and isinstance(orig_skills[i], dict):
+                    new_skills.append({**orig_skills[i], 'name': name})
+                else:
+                    new_skills.append({'name': name, 'level': '', 'category': ''})
+            result['skills'] = new_skills
+
+        # certifications
+        t_certs = {c['index']: c for c in (translated.get('certifications') or [])}
+        orig_certs = list(result.get('certifications') or [])
+        for i, c in enumerate(orig_certs):
+            if i in t_certs:
+                tc = t_certs[i]
+                if tc.get('name'):   c['name']   = tc['name']
+                if tc.get('issuer'): c['issuer']  = tc['issuer']
+        result['certifications'] = orig_certs
+
+        # custom_sections
+        t_cs = {cs['index']: cs for cs in (translated.get('custom_sections') or [])}
+        orig_cs = list(result.get('custom_sections') or [])
+        for i, cs in enumerate(orig_cs):
+            if i in t_cs:
+                tc = t_cs[i]
+                if tc.get('title'):   cs['title']   = tc['title']
+                if tc.get('items'):   cs['items']   = tc['items']
+                if tc.get('content'): cs['content'] = tc['content']
+        result['custom_sections'] = orig_cs
+
+        print(f"✅ Translation complete → {lang_full}")
+        return {"status": "success", "translated_cv": result}
+
+    except Exception as e:
+        print(f"❌ ERROR in translate_cv: {str(e)}")
+        import traceback; traceback.print_exc()
+        return {"status": "error", "error": str(e), "translated_cv": cv_data}
+import requests
+from bs4 import BeautifulSoup
+
+def extract_jd_from_url(url: str) -> str:
+    """
+    Scrapes the URL, extracts raw text, and asks Groq to extract the job description perfectly.
+    """
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        # Remove scripts and styles
+        for script in soup(["script", "style", "noscript", "header", "footer", "nav"]):
+            script.decompose()
+            
+        raw_text = soup.get_text(separator=' ', strip=True)
+        # Limit text length to avoid token limits
+        raw_text = raw_text[:15000]
+        
+        prompt = f"""
+        You are an expert recruiter. I have scraped text from a webpage that contains a job posting.
+        Please extract ONLY the job description (Role, Responsibilities, Requirements, Qualifications, Tech Stack, Company Info if relevant).
+        Do not include website navigation menus, generic footer text, or other noise.
+        Format it as clean, readable text. Do not add conversational intro/outro.
+        
+        Scraped Webpage Text:
+        {raw_text}
+        """
+        
+        response = call_groq_api([
+            {"role": "system", "content": "You are a helpful assistant that cleanly extracts job descriptions from messy webpage text."},
+            {"role": "user", "content": prompt}
+        ])
+        
+        if not response:
+            return "Failed to extract job description using AI."
+            
+        return response.strip()
+        
+    except Exception as e:
+        return f"Error scraping URL: {str(e)}"

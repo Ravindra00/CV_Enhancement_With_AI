@@ -1,7 +1,97 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { cvAPI, coverLetterAPI } from '../services/api';
+import { jsPDF } from 'jspdf';
 
+const LANG_OPTIONS = [
+  { value: 'auto', label: '🌐 Auto-detect' },
+  { value: 'Deutsch', label: '🇩🇪 Deutsch' },
+  { value: 'English', label: '🇬🇧 English' },
+  { value: 'French', label: '🇫🇷 French' },
+  { value: 'Spanish', label: '🇪🇸 Spanish' },
+];
+
+const SESS_LANG_KEY = 'ag_cl_language';
+const SESS_JD_KEY   = 'ag_cl_jobdesc';
+
+/* ─── Small Preview Modal ─────────────────────────────────────────── */
+const LetterPreviewModal = ({ letter, title, onClose }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(letter).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const handleDownloadPDF = () => {
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+    const margin = 22, pageW = 210, pageH = 297, usableW = pageW - margin * 2;
+    let y = margin;
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(10.5);
+    pdf.setTextColor(30, 30, 30);
+    for (const rawLine of letter.split('\n')) {
+      const trimmed = rawLine.trim();
+      if (trimmed === '') { y += 4; continue; }
+      const wrapped = pdf.splitTextToSize(trimmed, usableW);
+      for (const wl of wrapped) {
+        if (y + 6 > pageH - margin) { pdf.addPage(); y = margin; }
+        pdf.text(wl, margin, y);
+        y += 5.5;
+      }
+      y += 1;
+    }
+    pdf.save(`${(title || 'cover_letter').replace(/[^a-z0-9_]/gi, '_')}.pdf`);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Modal header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-slate-700">
+          <h2 className="font-bold text-gray-900 dark:text-slate-100">📄 Cover Letter Preview</h2>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCopy}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-slate-200 hover:bg-gray-200 dark:hover:bg-slate-600 transition font-medium"
+            >
+              {copied ? '✓ Copied' : '📋 Copy'}
+            </button>
+            <button
+              onClick={handleDownloadPDF}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-primary text-white hover:bg-primary-700 transition font-medium"
+            >
+              ⬇️ Download PDF
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 transition"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {/* Letter body */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {/* Decorative letter paper */}
+          <div className="bg-gray-50 dark:bg-slate-900 rounded-xl border border-gray-200 dark:border-slate-700 p-6">
+            <pre className="whitespace-pre-wrap font-sans text-sm text-gray-800 dark:text-slate-200 leading-relaxed">
+              {letter}
+            </pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── Main Page ────────────────────────────────────────────────────── */
 const CoverLetterGeneratorPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -10,59 +100,31 @@ const CoverLetterGeneratorPage = () => {
   const [cv, setCV] = useState(null);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [jobDescription, setJobDescription] = useState('');
+  const [jobDescription, setJobDescription] = useState(
+    () => sessionStorage.getItem(SESS_JD_KEY) || ''
+  );
   const [jobUrl, setJobUrl] = useState('');
   const [coverLetterTitle, setCoverLetterTitle] = useState('AI Generated Cover Letter');
   const [generatedLetter, setGeneratedLetter] = useState('');
+  const [generatedLetterId, setGeneratedLetterId] = useState(null);
   const [toast, setToast] = useState(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [language, setLanguage] = useState(
+    () => sessionStorage.getItem(SESS_LANG_KEY) || 'auto'
+  );
 
-  const [generatedLetterId, setGeneratedLetterId] = useState(null); // To track if the letter has been saved  
-
-  const generateAndSaveCoverLetter = async () => {
-    if (!jobDescription.trim()) {
-      showToast('Please enter a job description', 'error');
-      return;
-    }
-    if (!cvId) {
-      showToast('CV not selected', 'error');
-      return;
-    }
-
-    try {
-      setGenerating(true);
-      const res = await coverLetterAPI.generateWithAI(cvId, jobDescription, coverLetterTitle);
-      const letterText = res.data.content?.text || res.data.content;
-      if (!letterText) {
-        showToast('Error: No content in response', 'error');
-        return;
-      }
-      setGeneratedLetter(letterText);
-
-      // Save the generated letter immediately
-      const saveRes = await coverLetterAPI.create({
-        cv_id: cvId,
-        title: coverLetterTitle,
-        content: { text: letterText }
-      });
-      setGeneratedLetterId(saveRes.data.id); // Store the ID of the saved letter
-      showToast('Cover letter generated and saved successfully!');
-    } catch (err) {
-      showToast(err.response?.data?.detail || 'Failed to generate cover letter', 'error');
-    } finally {
-      setGenerating(false);
-    }
-  };
+  // Persist language + JD to sessionStorage
+  useEffect(() => { sessionStorage.setItem(SESS_LANG_KEY, language); }, [language]);
+  useEffect(() => { sessionStorage.setItem(SESS_JD_KEY, jobDescription); }, [jobDescription]);
 
   useEffect(() => {
-    if (cvId) {
-      fetchCV();
-    }
-  }, [cvId]);
+    if (cvId) fetchCV();
+  }, [cvId]); // eslint-disable-line
 
-  const showToast = (msg, type = 'success') => {
+  const showToast = useCallback((msg, type = 'success') => {
     setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
-  };
+    setTimeout(() => setToast(null), 4000);
+  }, []);
 
   const fetchCV = async () => {
     try {
@@ -77,10 +139,7 @@ const CoverLetterGeneratorPage = () => {
   };
 
   const extractJobDescriptionFromUrl = async () => {
-    if (!jobUrl.trim()) {
-      showToast('Please enter a job URL', 'error');
-      return;
-    }
+    if (!jobUrl.trim()) { showToast('Please enter a job URL', 'error'); return; }
     try {
       setGenerating(true);
       const res = await coverLetterAPI.extractFromURL(jobUrl);
@@ -93,56 +152,35 @@ const CoverLetterGeneratorPage = () => {
     }
   };
 
-  const generateCoverLetter = async () => {
-    if (!jobDescription.trim()) {
-      showToast('Please enter a job description', 'error');
-      return;
-    }
-    if (!cvId) {
-      showToast('CV not selected', 'error');
-      return;
-    }
+  const generateAndSaveCoverLetter = async () => {
+    if (!jobDescription.trim()) { showToast('Please enter a job description', 'error'); return; }
+    if (!cvId) { showToast('CV not selected', 'error'); return; }
 
     try {
       setGenerating(true);
-      const res = await coverLetterAPI.generateWithAI(cvId, jobDescription, coverLetterTitle);
-      // setGeneratedLetter(res.data.content?.text || res.data.content || '');
-
-      // Backend returns { text: "...", generated_with_ai: true }
+      setGeneratedLetter('');
+      setGeneratedLetterId(null);
+      const res = await coverLetterAPI.generateWithAI(cvId, jobDescription, coverLetterTitle, language);
       const letterText = res.data.content?.text || res.data.content;
-      if (!letterText) {
-        showToast('Error: No content in response', 'error');
-        return;
-      }
+      if (!letterText) { showToast('Error: No content in response', 'error'); return; }
       setGeneratedLetter(letterText);
       setGeneratedLetterId(res.data.id);
-      showToast('Cover letter generated successfully!');
+      showToast('Cover letter generated and saved!');
     } catch (err) {
-      showToast(err.response?.data?.detail || 'Failed to generate cover letter', 'error');
+      const detail = err.response?.data?.detail || 'Failed to generate cover letter';
+      showToast(detail, 'error');
     } finally {
       setGenerating(false);
     }
   };
 
-  const saveCoverLetter = async () => {
-    if (!generatedLetter.trim()) {
-      showToast('No cover letter to save', 'error');
-      return;
-    }
-    try {
-      setGenerating(true);
-      const saveRes = await coverLetterAPI.create({
-        cv_id: cvId,
-        title: coverLetterTitle,
-        content: { text: typeof generatedLetter === 'string' ? generatedLetter : generatedLetter.text || '' }
-      });
-      setGeneratedLetterId(saveRes.data.id);
-      showToast('Cover letter saved!');
-    } catch (err) {
-      showToast(err.response?.data?.detail || 'Failed to save', 'error');
-    } finally {
-      setGenerating(false);
-    }
+  const resetForm = () => {
+    setJobDescription('');
+    setJobUrl('');
+    setGeneratedLetter('');
+    setGeneratedLetterId(null);
+    setCoverLetterTitle('AI Generated Cover Letter');
+    sessionStorage.removeItem(SESS_JD_KEY);
   };
 
   if (loading) {
@@ -157,90 +195,124 @@ const CoverLetterGeneratorPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
+    <div className="min-h-screen bg-gray-50 dark:bg-slate-900 py-8">
+      {/* Toast */}
       {toast && (
-        <div className={`fixed top-16 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}>
-          {toast.msg}
+        <div className={`fixed top-16 right-4 z-50 px-4 py-3 rounded-xl shadow-lg text-sm font-medium text-white flex items-center gap-3 ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}>
+          <span>{toast.msg}</span>
+          {toast.type === 'error' && (
+            <button onClick={generateAndSaveCoverLetter} className="underline text-xs font-bold opacity-80 hover:opacity-100">
+              Retry
+            </button>
+          )}
         </div>
+      )}
+
+      {/* Preview modal */}
+      {showPreview && generatedLetter && (
+        <LetterPreviewModal
+          letter={generatedLetter}
+          title={coverLetterTitle}
+          onClose={() => setShowPreview(false)}
+        />
       )}
 
       <div className="max-w-4xl mx-auto px-6">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Generate Cover Letter</h1>
-            <p className="text-gray-500 mt-1">Using AI with {cv?.title}</p>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-slate-100">Generate Cover Letter</h1>
+            <p className="text-gray-500 dark:text-slate-400 mt-1">AI-powered with {cv?.title || 'selected CV'}</p>
           </div>
-          <button
-            onClick={() => navigate('/dashboard')}
-            className="text-gray-600 hover:text-gray-900 transition"
-          >
+          <button onClick={() => navigate('/dashboard')} className="text-gray-500 dark:text-slate-400 hover:text-gray-800 dark:hover:text-slate-200 transition">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        {/* Main Content */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Left: Input Section */}
-          <div className="space-y-6">
-            {/* Job Description Input */}
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Job Description</h2>
+          {/* ── Left: Input ── */}
+          <div className="space-y-5">
+            {/* Job Description */}
+            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-slate-700">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-4">Job Description</h2>
 
-              {/* URL Input Option */}
+              {/* URL extractor */}
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Extract from URL (Optional)</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Extract from URL (optional)</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={jobUrl}
                     onChange={e => setJobUrl(e.target.value)}
                     placeholder="https://linkedin.com/jobs/..."
-                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-slate-700 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500"
                   />
                   <button
                     onClick={extractJobDescriptionFromUrl}
                     disabled={generating}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:bg-gray-400 transition"
                   >
-                    {generating ? 'Extracting...' : 'Extract'}
+                    {generating ? '…' : 'Extract'}
                   </button>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Supports LinkedIn, Indeed, and similar job boards</p>
               </div>
 
-              {/* Text Textarea */}
+              {/* JD textarea */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Or Paste Job Description</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">Or Paste Job Description</label>
                 <textarea
                   value={jobDescription}
                   onChange={e => setJobDescription(e.target.value)}
                   placeholder="Paste the job description here..."
                   rows={8}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary resize-none"
+                  className="w-full px-3 py-2.5 border border-gray-300 dark:border-slate-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-none bg-white dark:bg-slate-700 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500"
                 />
               </div>
             </div>
 
-            {/* Cover Letter Title */}
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Cover Letter Title</h2>
-              <input
-                type="text"
-                value={coverLetterTitle}
-                onChange={e => setCoverLetterTitle(e.target.value)}
-                placeholder="e.g. Application for Senior Developer at TechCorp"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
-              />
+            {/* Settings: title + language */}
+            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-slate-700 space-y-4">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">Settings</h2>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1.5">Cover Letter Title</label>
+                <input
+                  type="text"
+                  value={coverLetterTitle}
+                  onChange={e => setCoverLetterTitle(e.target.value)}
+                  placeholder="e.g. Application for Senior Developer at TechCorp"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-slate-700 text-gray-900 dark:text-slate-100"
+                />
+              </div>
+
+              {/* Language selector */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1.5">Language</label>
+                <select
+                  value={language}
+                  onChange={e => setLanguage(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-slate-700 text-gray-900 dark:text-slate-100"
+                >
+                  {LANG_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">
+                  {language === 'auto'
+                    ? 'Auto-detect: language is inferred from the job description.'
+                    : `The letter will be written in ${language}.`
+                  }
+                </p>
+              </div>
             </div>
 
-            {/* Generate Button */}
+            {/* Generate button */}
             <button
               onClick={generateAndSaveCoverLetter}
               disabled={generating || !jobDescription.trim() || !cvId}
-              className="w-full py-3 bg-primary text-white rounded-lg font-semibold hover:bg-primary-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition flex items-center justify-center gap-2"
+              className="w-full py-3 bg-primary text-white rounded-xl font-semibold hover:bg-primary-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition flex items-center justify-center gap-2 shadow-sm"
             >
               {generating ? (
                 <>
@@ -248,7 +320,7 @@ const CoverLetterGeneratorPage = () => {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
-                  Generating with AI...
+                  Generating with AI…
                 </>
               ) : (
                 <>
@@ -261,90 +333,68 @@ const CoverLetterGeneratorPage = () => {
             </button>
           </div>
 
-          {/* Right: Preview Section */}
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 h-fit sticky top-20">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Preview</h2>
+          {/* ── Right: Result ── */}
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-slate-700 h-fit sticky top-20">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-4">Result</h2>
 
-            {/* {generatedLetter ? (
-              <>
-                <div className="prose prose-sm max-w-none mb-4 bg-gray-50 p-4 rounded-lg max-h-96 overflow-y-auto text-gray-700 whitespace-pre-wrap leading-relaxed">
-                  {generatedLetter}
-                </div>
-                <button
-                  onClick={saveCoverLetter}
-                  disabled={generating}
-                  className="w-full py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:bg-gray-400 transition"
-                >
-                  {generating ? 'Saving...' : 'Save Cover Letter'}
-                </button>
-              </>
-            ) : (
-              <div className="text-center py-12 text-gray-500">
-                <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <p>Enter a job description and click "Generate with AI" to see the preview</p>
-              </div>
-            )} */}
             {generatedLetter ? (
               <>
-                {/* FIXED: Display the text, not the object */}
-                <div className="prose prose-sm max-w-none mb-4 bg-gray-50 p-4 rounded-lg max-h-96 overflow-y-auto text-gray-700 whitespace-pre-wrap leading-relaxed">
-                  {/* ✅ FIX: Get the text directly */}
-                  {typeof generatedLetter === 'string'
-                    ? generatedLetter
-                    : generatedLetter.content_text || generatedLetter.text || JSON.stringify(generatedLetter)}
+                {/* Letter text preview */}
+                <div className="mb-4 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-lg p-4 max-h-72 overflow-y-auto">
+                  <pre className="whitespace-pre-wrap font-sans text-xs text-gray-700 dark:text-slate-300 leading-relaxed">
+                    {generatedLetter.length > 600
+                      ? generatedLetter.substring(0, 600) + '…'
+                      : generatedLetter
+                    }
+                  </pre>
                 </div>
-                { /* rest of the button */}
 
                 <div className="space-y-2">
-                  {/* Save cover letter */}
+                  {/* View / Preview button (identical to manual letters) */}
                   <button
-                    onClick={saveCoverLetter}
-                    disabled={generating}
-                    className="w-full py-2.5 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 disabled:bg-gray-400 transition flex items-center justify-center gap-2"
+                    onClick={() => setShowPreview(true)}
+                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold text-sm transition flex items-center justify-center gap-2"
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" /></svg>
-                    {generating ? 'Saving...' : 'Save Cover Letter'}
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    👁 View / Preview
                   </button>
-                  {/* View saved letter */}
+
+                  {/* Edit in full editor */}
                   {generatedLetterId && (
                     <button
                       onClick={() => navigate(`/cover-letters/${generatedLetterId}`)}
-                      className="w-full py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition"
+                      className="w-full py-2 bg-blue-600 text-white rounded-lg font-medium text-sm hover:bg-blue-700 transition"
                     >
-                      ✎ Edit in Full Editor
+                      ✏️ Edit in Full Editor
                     </button>
                   )}
 
-                  {/* Back to list */}
+                  {/* View all */}
                   <button
                     onClick={() => navigate('/cover-letters')}
-                    className="w-full py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition"
+                    className="w-full py-2 bg-green-600 text-white rounded-lg font-medium text-sm hover:bg-green-700 transition"
                   >
                     ✓ View All Letters
                   </button>
 
                   {/* Generate another */}
                   <button
-                    onClick={() => {
-                      setJobDescription('');
-                      setJobUrl('');
-                      setGeneratedLetter('');
-                      setGeneratedLetterId(null);
-                      setCoverLetterTitle('AI Generated Cover Letter');
-                    }}
-                    className="w-full py-2 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition"
+                    onClick={resetForm}
+                    className="w-full py-2 border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-slate-300 rounded-lg font-medium text-sm hover:bg-gray-50 dark:hover:bg-slate-700 transition"
                   >
                     ↻ Generate Another
                   </button>
                 </div>
-              </>) : (
-              <div className="text-center py-12 text-gray-500">
-                <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              </>
+            ) : (
+              <div className="text-center py-12 text-gray-400 dark:text-slate-500">
+                <svg className="w-12 h-12 mx-auto mb-3 text-gray-300 dark:text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                <p>Enter a job description and click "Generate with AI" to see the preview</p>
+                <p className="text-sm">Enter a job description and click "Generate with AI" to create your cover letter.</p>
               </div>
             )}
           </div>

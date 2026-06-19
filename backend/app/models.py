@@ -7,10 +7,10 @@ from sqlalchemy import (
     Boolean,
     ForeignKey,
     Enum,
-    Index
+    Index,
+    JSON,        # Database-agnostic JSON: maps to MySQL JSON, PostgreSQL JSONB, etc.
 )
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime
 import enum
 
@@ -44,6 +44,8 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_superuser = Column(Boolean, default=False)   # Admin: can manage all users
     ai_access = Column(Boolean, default=True)        # Controls access to AI features
+    is_verified = Column(Boolean, default=False)
+    verification_token = Column(String(255), nullable=True)
 
     last_login = Column(DateTime, nullable=True)
     failed_login_attempts = Column(Integer, default=0, nullable=False)
@@ -77,19 +79,19 @@ class CV(Base):
     profile_summary = Column(Text)
 
     # Flexible JSON Sections
-    personal_info = Column(JSONB, nullable=True)  # Editor format: {name, title, email, phone, location, linkedin, website, summary, photo}
-    educations = Column(JSONB)
-    experiences = Column(JSONB)
-    projects = Column(JSONB)
-    skills = Column(JSONB)
-    languages = Column(JSONB)
-    certifications = Column(JSONB)
-    interests = Column(JSONB)
-    custom_sections = Column(JSONB)   # [{title, content}]
-    theme = Column(JSONB)             # {primaryColor, fontFamily, layout, accentStyle}
+    personal_info = Column(JSON, nullable=True)  # Editor format: {name, title, email, phone, location, linkedin, website, summary, photo}
+    educations = Column(JSON)
+    experiences = Column(JSON)
+    projects = Column(JSON)
+    skills = Column(JSON)
+    languages = Column(JSON)
+    certifications = Column(JSON)
+    interests = Column(JSON)
+    custom_sections = Column(JSON)   # [{title, content}]
+    theme = Column(JSON)             # {primaryColor, fontFamily, layout, accentStyle}
 
     # AI-ready metadata
-    embedding = Column(JSONB, nullable=True)  # can replace with pgvector later
+    embedding = Column(JSON, nullable=True)  # vector-ready field for future ML integration
 
     # File Storage
     file_path = Column(String(500))
@@ -126,7 +128,7 @@ class CVVersion(Base):
     cv_id = Column(Integer, ForeignKey("cvs.id"), nullable=False)
     version_number = Column(Integer, nullable=False)
 
-    snapshot = Column(JSONB, nullable=False)  # full CV snapshot
+    snapshot = Column(JSON, nullable=False)  # full CV snapshot
 
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -149,9 +151,9 @@ class CVCustomization(Base):
 
     job_description = Column(Text, nullable=False)
 
-    matched_keywords = Column(JSONB)
-    missing_keywords = Column(JSONB)  # Missing keywords from job description
-    customized_snapshot = Column(JSONB)
+    matched_keywords = Column(JSON)
+    missing_keywords = Column(JSON)  # Missing keywords from job description
+    customized_snapshot = Column(JSON)
 
     ats_score = Column(Integer)
     similarity_score = Column(Integer)
@@ -185,7 +187,7 @@ class Suggestion(Base):
     # For projects: {name, description, technologies, ...}
     # For skills: {programming: [...], cloud: [...], ...}
     # For education: {degree, institution_name, field_of_study, ...}
-    suggestion_data = Column(JSONB, nullable=True)
+    suggestion_data = Column(JSON, nullable=True)
 
     is_applied = Column(Boolean, default=False)
 
@@ -208,7 +210,7 @@ class CoverLetter(Base):
     cv_id = Column(Integer, ForeignKey("cvs.id"), nullable=True)
 
     title = Column(String(255), default="My Cover Letter", nullable=False)
-    content = Column(JSONB, default=dict)
+    content = Column(JSON, default=dict)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -260,8 +262,8 @@ class AuditLog(Base):
     action = Column(String(100), nullable=False)           # e.g. "user_created", "user_deleted"
     entity_type = Column(String(50), nullable=False)       # e.g. "User", "CV"
     entity_id = Column(String(50), nullable=True)          # e.g. "42"
-    old_values = Column(JSONB, nullable=True)
-    new_values = Column(JSONB, nullable=True)
+    old_values = Column(JSON, nullable=True)
+    new_values = Column(JSON, nullable=True)
     ip_address = Column(String(50), nullable=True)
     status = Column(String(20), default="success")         # "success" | "failed"
     notes = Column(Text, nullable=True)
@@ -274,3 +276,17 @@ class AuditLog(Base):
         Index("idx_audit_admin_time", "admin_id", "created_at"),
         Index("idx_audit_entity", "entity_type", "entity_id"),
     )
+class OTP(Base):
+    __tablename__ = "otps"
+    id = Column(Integer, primary_key=True)
+    email = Column(String(255), index=True, nullable=False)
+    pin = Column(String(10), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class SystemConfig(Base):
+    __tablename__ = "system_configs"
+    key = Column(String(255), primary_key=True)
+    value = Column(Text, nullable=False)
+    description = Column(String(500), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

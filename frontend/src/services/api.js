@@ -30,12 +30,17 @@ apiClient.interceptors.response.use(
 // ── Auth ──────────────────────────────────────────────────────────────────────
 export const authAPI = {
   signup: (data) => apiClient.post('/auth/signup', data),
+  verifyPin: (data) => apiClient.post('/auth/verify-pin', data),
   login: (data) => apiClient.post('/auth/login', data),
   logout: () => apiClient.post('/auth/logout'),
 };
 
 // ── CV ────────────────────────────────────────────────────────────────────────
 export const cvAPI = {
+  // Scrape JD from URL
+  scrapeJobDescription: async (url) => {
+    return await apiClient.post('/cvs/scrape-jd', { url });
+  },
   getAll: () => apiClient.get('/cvs'),
   getOne: (id) => apiClient.get(`/cvs/${id}`),
   create: (data) => apiClient.post('/cvs', data),
@@ -85,6 +90,12 @@ export const cvAPI = {
 
   suggestSkills: (cvId, jobDescription, currentSkills) =>
     apiClient.post(`/cvs/${cvId}/suggest-skills`, { job_description: jobDescription, current_skills: currentSkills }),
+
+  tailorForJob: (cvId, jobDescription, sections) =>
+    apiClient.post(`/cvs/${cvId}/tailor-for-job`, { job_description: jobDescription, sections }),
+
+  translateLanguage: (cvId, language, save = false) =>
+    apiClient.post(`/cvs/${cvId}/translate-language`, { language, save }),
 };
 
 // ── AI Customize ──────────────────────────────────────────────────────────────
@@ -111,8 +122,8 @@ export const coverLetterAPI = {
   create: (data) => apiClient.post('/cover-letters', data),
   update: (id, data) => apiClient.put(`/cover-letters/${id}`, data),
   delete: (id) => apiClient.delete(`/cover-letters/${id}`),
-  generateWithAI: (cvId, jobDescription, title = "AI Generated Cover Letter") =>
-    apiClient.post('/cover-letters/generate-with-ai', { cv_id: cvId, job_description: jobDescription, title }),
+  generateWithAI: (cvId, jobDescription, title = "AI Generated Cover Letter", language = "auto") =>
+    apiClient.post('/cover-letters/generate-with-ai', { cv_id: cvId, job_description: jobDescription, title, language }),
   extractFromURL: (url) =>
     apiClient.post('/cover-letters/extract-job-from-url', { url }),
 };
@@ -131,6 +142,9 @@ export const jobApplicationAPI = {
 // ── Admin (Superuser) ─────────────────────────────────────────────────────────
 export const adminAPI = {
   getStats: () => apiClient.get('/admin/stats'),
+  getOTPs: (page = 1, limit = 20) => apiClient.get(`/admin/otps?page=${page}&limit=${limit}`),
+  getConfigs: () => apiClient.get('/admin/configs'),
+  updateConfigs: (data) => apiClient.put('/admin/configs', data),
   getUsers: (params) => apiClient.get('/admin/users', { params }),
   getUser: (id) => apiClient.get(`/admin/users/${id}`),
   createUser: (data) => apiClient.post('/admin/users', data),

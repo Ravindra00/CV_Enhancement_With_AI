@@ -1020,6 +1020,20 @@ const CVCustomizePage = () => {
             {/* ══ AI ENHANCE TAB ════════════════════════════════════════════ */}
             {activeTab === 'ai' && (
               <div className="space-y-5">
+                {!canUseAI ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center px-4 bg-gray-50 dark:bg-slate-800/50 rounded-xl border border-gray-100 dark:border-slate-700">
+                    <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mb-4">
+                      <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8V7z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">AI Access Disabled</h3>
+                    <p className="text-sm text-gray-500 dark:text-slate-400">
+                      The AI features have been disabled for your account. Please contact the administrator for access.
+                    </p>
+                  </div>
+                ) : (
+                  <>
                 <div>
                   <label className="block text-sm font-semibold text-gray-800 dark:text-slate-200 mb-1">Job Description</label>
                   <p className="text-xs text-gray-500 dark:text-slate-400 mb-2">Paste the job posting. Choose keyword analysis or full AI rewrite.</p>
@@ -1149,6 +1163,8 @@ const CVCustomizePage = () => {
                       ))}
                     </div>
                   </div>
+                )}
+                  </>
                 )}
               </div>
             )}

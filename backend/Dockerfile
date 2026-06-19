@@ -23,5 +23,5 @@ RUN mkdir -p uploads
 # Expose port
 EXPOSE 8000
 
-# Run the application
-CMD ["python", "run.py", "--host", "0.0.0.0"]
+# Run the application using Gunicorn
+CMD ["gunicorn", "app.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000"]

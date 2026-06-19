@@ -29,6 +29,9 @@ const PRESET_COLORS = [
 const FONT_OPTIONS = [
     { label: 'Inter', value: 'Inter, system-ui, sans-serif' },
     { label: 'Roboto', value: 'Roboto, Arial, sans-serif' },
+    { label: 'Poppins', value: 'Poppins, system-ui, sans-serif' },
+    { label: 'Outfit', value: 'Outfit, system-ui, sans-serif' },
+    { label: 'Space Grotesk', value: '"Space Grotesk", sans-serif' },
     { label: 'Georgia', value: 'Georgia, Times New Roman, serif' },
     { label: 'Playfair', value: '"Playfair Display", Georgia, serif' },
     { label: 'Merriweather', value: 'Merriweather, Georgia, serif' },
@@ -37,12 +40,15 @@ const FONT_OPTIONS = [
 ];
 
 const LAYOUTS = [
-    { label: 'Clean', value: 'clean', icon: '📄', desc: 'White background, icon headers' },
-    { label: 'Classic', value: 'classic', icon: '🎨', desc: 'Color header banner' },
-    { label: 'Modern', value: 'modern', icon: '⊡', desc: 'Colored sidebar' },
-    { label: 'Executive', value: 'executive', icon: '💼', desc: 'Two-column body' },
+    { label: 'Classic', value: 'classic', icon: '🎨', desc: 'Header band + sidebar: matches sample layout' },
+    { label: 'Clean', value: 'clean', icon: '📄', desc: 'Single-column, minimal whitespace' },
+    { label: 'Modern', value: 'modern', icon: '⊡', desc: 'Full-height colored sidebar' },
+    { label: 'Executive', value: 'executive', icon: '💼', desc: 'Color header + two-column body' },
     { label: 'Minimal', value: 'minimal', icon: '▭', desc: 'Ultra clean whitespace' },
     { label: 'ATS-Safe', value: 'ats', icon: '🤖', desc: 'Plain — optimized for parsers' },
+    { label: 'Two-Tone', value: 'twotone', icon: '🌓', desc: 'Contrasting section backgrounds' },
+    { label: 'Elegant', value: 'elegant', icon: '✨', desc: 'Refined serif headers, spacious' },
+    { label: 'Tech', value: 'tech', icon: '💻', desc: 'Monospace accents, sharp borders' },
 ];
 
 const ACCENT_STYLES = [
@@ -56,18 +62,18 @@ const TEMPLATES = [
     {
         id: 'classic',
         name: 'Classic',
-        desc: 'Traditional serif, single-column',
+        desc: 'Header band + sidebar layout',
         icon: '📜',
-        gradient: 'from-amber-900 to-amber-700',
-        preview: { bg: '#1e3a5f', text: '#fff' },
+        gradient: 'from-blue-800 to-blue-600',
+        preview: { bg: '#2563eb', text: '#fff' },
         config: {
             layout: 'classic',
-            primaryColor: '#1e3a5f',
-            fontFamily: 'Georgia, Times New Roman, serif',
+            primaryColor: '#2563eb',
+            fontFamily: 'Georgia, "Times New Roman", serif',
             accentStyle: 'line',
-            pageMargin: 24,
-            sectionSpacing: 10,
-            columnSplit: 35,
+            pageMargin: 28,
+            sectionSpacing: 14,
+            columnSplit: 32,
         },
     },
     {
@@ -147,8 +153,8 @@ const TemplateThumbnail = ({ template, isActive }) => {
     );
 };
 
-const ThemePanel = ({ theme, onThemeChange }) => {
-    const [open, setOpen] = useState(false);
+const ThemePanel = ({ theme, onThemeChange, hideHeader, defaultOpen }) => {
+    const [open, setOpen] = useState(defaultOpen || false);
     const [tab, setTab] = useState('templates'); // templates | layout | color | font | accent | spacing
 
     const set = useCallback((key, val) => {
@@ -159,7 +165,7 @@ const ThemePanel = ({ theme, onThemeChange }) => {
         onThemeChange({ ...theme, ...tpl.config });
     }, [theme, onThemeChange]);
 
-    const needsColumnControl = ['modern', 'executive'].includes(theme.layout);
+    const needsColumnControl = ['modern', 'executive', 'classic'].includes(theme.layout);
 
     const Tab = ({ id, label }) => (
         <button
@@ -191,6 +197,7 @@ const ThemePanel = ({ theme, onThemeChange }) => {
 
     return (
         <div className="bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 overflow-hidden">
+            {!hideHeader && (
             <button
                 onClick={() => setOpen(o => !o)}
                 className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-slate-700 transition"
@@ -204,6 +211,7 @@ const ThemePanel = ({ theme, onThemeChange }) => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
             </button>
+            )}
 
             {open && (
                 <div className="border-t border-gray-100 dark:border-slate-700">
@@ -215,6 +223,7 @@ const ThemePanel = ({ theme, onThemeChange }) => {
                         <Tab id="font" label="Font" />
                         <Tab id="accent" label="Accent" />
                         <Tab id="spacing" label="Spacing" />
+                        <Tab id="sections" label="Sections" />
                     </div>
 
                     <div className="px-4 pb-4 pt-3">
@@ -395,6 +404,53 @@ const ThemePanel = ({ theme, onThemeChange }) => {
                                 </div>
                             </div>
                         )}
+
+                        {/* ── Sections tab ── */}
+                        {tab === 'sections' && (
+                            <div className="space-y-4">
+                                <p className="text-[10px] text-gray-400 dark:text-slate-500 mb-2">Override global theme settings for specific sections.</p>
+                                
+                                <div className="space-y-3">
+                                    <div className="border border-gray-200 dark:border-slate-700 rounded-lg p-3 bg-gray-50 dark:bg-slate-900">
+                                        <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-2">Header Title Color</label>
+                                        <div className="flex items-center gap-3">
+                                            <input
+                                                type="color"
+                                                value={theme.sectionOverrides?.headerColor || theme.primaryColor || '#000000'}
+                                                onChange={e => set('sectionOverrides', { ...theme.sectionOverrides, headerColor: e.target.value })}
+                                                className="w-8 h-8 rounded border border-gray-300 cursor-pointer p-0.5"
+                                            />
+                                            <span className="text-[10px] font-mono text-gray-500">{theme.sectionOverrides?.headerColor || theme.primaryColor || '#000000'}</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="border border-gray-200 dark:border-slate-700 rounded-lg p-3 bg-gray-50 dark:bg-slate-900">
+                                        <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-2">Skill Badge Style</label>
+                                        <div className="flex gap-2">
+                                            <button onClick={() => set('sectionOverrides', { ...theme.sectionOverrides, skillStyle: 'solid' })} 
+                                                className={`flex-1 text-[10px] py-1.5 rounded border transition ${theme.sectionOverrides?.skillStyle === 'solid' ? 'bg-primary text-white border-primary' : 'bg-white border-gray-200 text-gray-700'}`}>Solid</button>
+                                            <button onClick={() => set('sectionOverrides', { ...theme.sectionOverrides, skillStyle: 'outline' })} 
+                                                className={`flex-1 text-[10px] py-1.5 rounded border transition ${theme.sectionOverrides?.skillStyle === 'outline' ? 'bg-primary text-white border-primary' : 'bg-white border-gray-200 text-gray-700'}`}>Outline</button>
+                                            <button onClick={() => set('sectionOverrides', { ...theme.sectionOverrides, skillStyle: 'text' })} 
+                                                className={`flex-1 text-[10px] py-1.5 rounded border transition ${(theme.sectionOverrides?.skillStyle || 'text') === 'text' ? 'bg-primary text-white border-primary' : 'bg-white border-gray-200 text-gray-700'}`}>Text</button>
+                                        </div>
+                                    </div>
+
+                                    <div className="border border-gray-200 dark:border-slate-700 rounded-lg p-3 bg-gray-50 dark:bg-slate-900">
+                                        <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-2">Section Title Alignment</label>
+                                        <div className="flex gap-2">
+                                            <button onClick={() => set('sectionOverrides', { ...theme.sectionOverrides, titleAlign: 'left' })} 
+                                                className={`flex-1 text-[10px] py-1.5 rounded border transition ${(theme.sectionOverrides?.titleAlign || 'left') === 'left' ? 'bg-primary text-white border-primary' : 'bg-white border-gray-200 text-gray-700'}`}>Left</button>
+                                            <button onClick={() => set('sectionOverrides', { ...theme.sectionOverrides, titleAlign: 'center' })} 
+                                                className={`flex-1 text-[10px] py-1.5 rounded border transition ${theme.sectionOverrides?.titleAlign === 'center' ? 'bg-primary text-white border-primary' : 'bg-white border-gray-200 text-gray-700'}`}>Center</button>
+                                        </div>
+                                    </div>
+                                    
+                                    <button onClick={() => set('sectionOverrides', {})} className="w-full text-[10px] text-red-500 py-1 border border-red-200 rounded hover:bg-red-50 transition">Clear Overrides</button>
+                                </div>
+                            </div>
+                        )}
+
                     </div>
                 </div>
             )}

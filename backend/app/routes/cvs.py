@@ -8,14 +8,32 @@ from app.models import User, CV, Suggestion, CVCustomization
 from app.schemas import CVResponse, CVCreate, CVUpdate, CVCustomizationRequest, SuggestionResponse, ApplyAIChangesRequest
 from app.dependencies import get_current_user, require_ai_access
 from app.utils.cv_parser import parse_cv_file
-from app.utils.ai_integration import analyze_cv, enhance_cv_for_job, groq_enhance_sections
-from app.utils.ai_enhance import extract_keywords, compute_match_score, rule_based_suggestions, groq_suggestions
+from app.utils.ai_integration import analyze_cv, enhance_cv_for_job, groq_enhance_sections, tailor_cv_sections, translate_cv
+from app.utils.ai_enhance import extract_keywords, compute_match_score, rule_based_suggestions, ai_suggestions
 from app.utils.pdf_generator import generate_cv_pdf
 import os
 import io
 from datetime import datetime
 
 router = APIRouter(prefix="/cvs", tags=["cvs"])
+
+from app.schemas import ScrapeJDRequest
+from app.utils.ai_integration import extract_jd_from_url
+
+@router.post("/scrape-jd")
+def scrape_job_description(
+    request: ScrapeJDRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Scrape a URL and use AI to extract the job description.
+    """
+    jd_text = extract_jd_from_url(request.url)
+    if jd_text.startswith("Error scraping URL") or jd_text == "Failed to extract job description using AI.":
+        raise HTTPException(status_code=400, detail=jd_text)
+        
+    return {"job_description": jd_text}
+
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -231,6 +249,7 @@ def _build_cv_data_dict(cv: CV) -> dict:
     """Build a unified CV data dict from the ORM model for AI functions."""
     return {
         'full_name': cv.full_name,
+        'title': cv.title,
         'email': cv.email,
         'phone': cv.phone,
         'location': cv.location,
@@ -242,6 +261,7 @@ def _build_cv_data_dict(cv: CV) -> dict:
         'certifications': cv.certifications or [],
         'languages': cv.languages or [],
         'projects': cv.projects or [],
+        'custom_sections': cv.custom_sections or [],
         'personal_info': _get_personal_info(cv),
     }
 
@@ -428,17 +448,20 @@ def upload_cv_file(
 
         # --- Flat fields ---
         cv.file_path = file_path
-        cv.original_text = parsed_data.get('original_text', '')
+        # raw_text key may be 'raw_text' (new parser) or 'original_text'
+        cv.original_text = parsed_data.get('raw_text') or parsed_data.get('original_text', '')
 
-        cv.full_name = parsed_data.get('full_name') or pi.get('name', '')
-        cv.email = parsed_data.get('email') or pi.get('email', '')
-        cv.phone = parsed_data.get('phone') or pi.get('phone', '')
-        cv.location = parsed_data.get('location') or pi.get('location', '')
-        cv.linkedin_url = parsed_data.get('linkedin_url') or pi.get('linkedin', '')
-        cv.profile_summary = parsed_data.get('profile_summary') or pi.get('summary', '')
+        cv.full_name = pi.get('name') or parsed_data.get('full_name') or cv.full_name or ''
+        cv.email = pi.get('email') or parsed_data.get('email') or cv.email or ''
+        cv.phone = pi.get('phone') or parsed_data.get('phone') or cv.phone or ''
+        cv.location = pi.get('location') or parsed_data.get('location') or cv.location or ''
+        cv.linkedin_url = pi.get('linkedin') or parsed_data.get('linkedin_url') or cv.linkedin_url or ''
+        # A5: profile_summary from 'summary' key in parser output
+        parsed_summary = parsed_data.get('summary') or pi.get('summary') or ''
+        if parsed_summary:
+            cv.profile_summary = parsed_summary
 
         # BUG 1 FIX: derive cv.title from job title, NOT from filename.
-        # Priority order: parsed jobTitle → name → filename stem (fallback only).
         parsed_job_title = pi.get('jobTitle', '').strip()
         filename_stem = os.path.splitext(file.filename)[0]
         cv.title = parsed_job_title or cv.full_name or filename_stem
@@ -450,9 +473,29 @@ def upload_cv_file(
         cv.certifications = parsed_data.get('certifications', [])
         cv.languages = parsed_data.get('languages', [])
         cv.projects = parsed_data.get('projects', [])
+        cv.interests = parsed_data.get('interests', [])
+        # A5: store custom_sections from parser (normalize: ensure content is set from items)
+        raw_custom = parsed_data.get('custom_sections', [])
+        normalized_custom = []
+        for cs in (raw_custom or []):
+            if not isinstance(cs, dict):
+                continue
+            title = cs.get('title', '')
+            items = cs.get('items', [])
+            content = cs.get('content', '')
+            # Build content from items if content is missing
+            if not content and items:
+                content = '\n'.join(
+                    f'\u2022 {it}' if not str(it).startswith(('\u2022', '-', '*')) else str(it)
+                    for it in items
+                )
+            normalized_custom.append({'title': title, 'items': items, 'content': content})
+        if normalized_custom:
+            cv.custom_sections = normalized_custom
 
         # Build personal_info so the editor gets a fully-populated object.
-        # 'jobTitle' field is set explicitly so it never carries the filename.
+        # 'jobTitle' set explicitly so it never carries the filename.
+        # A5: preserve existing photo_path — do NOT overwrite with null.
         cv.personal_info = {
             'name': cv.full_name or '',
             'jobTitle': parsed_job_title,
@@ -641,8 +684,8 @@ def customize_cv(
     jd_keywords = extract_keywords(job_desc)
     score, matched, missing = compute_match_score(cv_keywords, jd_keywords)
 
-    # ── AI suggestions (Groq) with rule-based fallback ────────────────────────
-    suggestions_data = groq_suggestions(cv_data, job_desc, missing, score)
+    # ── AI suggestions (Dynamic models) with rule-based fallback ────────────────────────
+    suggestions_data = ai_suggestions(cv_data, job_desc, missing, score)
     if not suggestions_data:
         suggestions_data = rule_based_suggestions(cv_data, job_desc, missing, score)
 
@@ -1416,3 +1459,113 @@ def suggest_skills(
                 return {"suggested_skills": []}
     
     return {"suggested_skills": []}
+
+
+# ── AI Job Tailoring — section diffs ──────────────────────────────────────────
+
+class TailorRequest(BaseModel):
+    job_description: str
+    sections: List[str] = ["all"]  # e.g. ['experiences', 'summary', 'skills'] or ['all']
+
+
+@router.post("/{cv_id}/tailor-for-job")
+def tailor_cv_for_job(
+    cv_id: int,
+    request: TailorRequest,
+    current_user: User = Depends(require_ai_access),
+    db: Session = Depends(get_db)
+):
+    """
+    AI Job Tailoring: returns before/after diffs for selected sections.
+    The user can then accept/reject each change individually.
+    """
+    cv = db.query(CV).filter(CV.id == cv_id, CV.user_id == current_user.id).first()
+    if not cv:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
+
+    if not request.job_description.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Job description is required")
+
+    cv_data = _build_cv_data_dict(cv)
+    result = tailor_cv_sections(cv_data, request.job_description, request.sections)
+
+    if result.get('status') == 'error':
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=result.get('error', 'AI tailoring failed')
+        )
+
+    return result
+
+
+# ── CV Language Translation ────────────────────────────────────────────────────
+
+class TranslateRequest(BaseModel):
+    language: str  # 'Deutsch', 'English', 'French', 'Spanish', 'Italian', 'Portuguese'
+    save: bool = False  # if True, write translated content back to DB
+
+
+@router.post("/{cv_id}/translate-language")
+def translate_cv_language(
+    cv_id: int,
+    request: TranslateRequest,
+    current_user: User = Depends(require_ai_access),
+    db: Session = Depends(get_db)
+):
+    """
+    Translate all text fields of a CV into the target language.
+    Preserves names, dates, URLs, and structure.
+    If save=True, persists translated content back to the DB.
+    """
+    cv = db.query(CV).filter(CV.id == cv_id, CV.user_id == current_user.id).first()
+    if not cv:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
+
+    SUPPORTED = ['Deutsch', 'English', 'French', 'Spanish', 'Italian', 'Portuguese']
+    if request.language not in SUPPORTED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported language. Choose from: {', '.join(SUPPORTED)}"
+        )
+
+    cv_data = _build_cv_data_dict(cv)
+    result = translate_cv(cv_data, request.language)
+
+    if result.get('status') not in ('success',):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=result.get('error', 'Translation failed')
+        )
+
+    translated = result['translated_cv']
+
+    if request.save:
+        # Write translated content back to DB fields
+        t_pi = translated.get('personal_info') or translated.get('personalInfo') or {}
+        if t_pi.get('summary'):  cv.profile_summary = t_pi['summary']
+        if t_pi.get('title'):    cv.title = t_pi['title']
+
+        if translated.get('experiences'): cv.experiences    = translated['experiences']
+        elif translated.get('experience'): cv.experiences   = translated['experience']
+        if translated.get('educations'):  cv.educations     = translated['educations']
+        elif translated.get('education'): cv.educations     = translated['education']
+        if translated.get('skills'):          cv.skills         = translated['skills']
+        if translated.get('certifications'):  cv.certifications = translated['certifications']
+        if translated.get('custom_sections'): cv.custom_sections= translated['custom_sections']
+
+        # Update personal_info blob
+        existing_pi = cv.personal_info or {}
+        existing_pi.update({
+            'summary':  t_pi.get('summary', existing_pi.get('summary', '')),
+            'title':    t_pi.get('title',   existing_pi.get('title', '')),
+            'jobTitle': t_pi.get('jobTitle',existing_pi.get('jobTitle', '')),
+        })
+        cv.personal_info = existing_pi
+        cv.updated_at = __import__('datetime').datetime.utcnow()
+        db.commit()
+        db.refresh(cv)
+        return _cv_to_response(cv)
+
+    # If not saving, return translated cv data without touching DB
+    return {"status": "success", "translated_cv": translated, "language": request.language}
+

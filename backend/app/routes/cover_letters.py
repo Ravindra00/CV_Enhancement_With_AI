@@ -16,6 +16,7 @@ class GenerateCoverLetterRequest(BaseModel):
     cv_id: int
     job_description: str
     title: str = "AI Generated Cover Letter"
+    language: str = "auto"  # 'auto', 'Deutsch', 'English', 'French', 'Spanish'
 
 class ExtractJobDescriptionRequest(BaseModel):
     url: str
@@ -141,7 +142,7 @@ def generate_with_ai(
         
         # ✅ Generate cover letter with AI
         print(f"🤖 Calling generate_cover_letter()...")
-        content = generate_cover_letter(cv_data, request.job_description, current_user.name)
+        content = generate_cover_letter(cv_data, request.job_description, current_user.name, language=request.language)
         
         if not content:
             print(f"❌ AI generation returned empty content")

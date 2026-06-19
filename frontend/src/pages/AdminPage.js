@@ -633,8 +633,61 @@ const AdminPage = () => {
     const [activeTab, setActiveTab] = useState('dashboard');
     const [stats, setStats] = useState(null);
     const [auditLogs, setAuditLogs] = useState([]);
+    const [otps, setOtps] = useState([]);
     const [loadingStats, setLoadingStats] = useState(true);
+    const [configs, setConfigs] = useState([]);
+    const [savingConfigs, setSavingConfigs] = useState(false);
     const { show, Toast } = useToast();
+
+    const fetchOTPs = async () => {
+        try {
+            const response = await adminAPI.getOTPs();
+            setOtps(response.data.items || []);
+        } catch (error) {
+            console.error('Failed to fetch OTPs', error);
+        }
+    };
+    
+    useEffect(() => {
+        if (activeTab === 'otps') fetchOTPs();
+        if (activeTab === 'settings') fetchConfigs();
+    }, [activeTab]);
+
+    const fetchConfigs = async () => {
+        try {
+            const res = await adminAPI.getConfigs();
+            const items = res.data.items || [];
+            // Defaults mapping
+            const requiredKeys = ['groq_api_key', 'groq_api_url', 'groq_model', 'cv_tailor_prompt', 'cv_experience_prompt', 'cover_letter_prompt'];
+            const currentKeys = items.map(i => i.key);
+            requiredKeys.forEach(k => {
+                if (!currentKeys.includes(k)) items.push({ key: k, value: '' });
+            });
+            setConfigs(items);
+        } catch { show('Failed to fetch configs', 'error'); }
+    };
+
+    const handleConfigChange = (key, value) => {
+        setConfigs(configs.map(c => c.key === key ? { ...c, value } : c));
+    };
+
+    const saveConfigs = async () => {
+        setSavingConfigs(true);
+        try {
+            await adminAPI.updateConfigs({ configs });
+            show('All configurations saved successfully', 'success');
+        } catch { show('Failed to save configs', 'error'); }
+        finally { setSavingConfigs(false); }
+    };
+
+    const saveSingleConfig = async (config) => {
+        setSavingConfigs(true);
+        try {
+            await adminAPI.updateConfigs({ configs: [config] });
+            show(`${config.key.replace(/_/g, ' ')} saved successfully`, 'success');
+        } catch { show(`Failed to save ${config.key}`, 'error'); }
+        finally { setSavingConfigs(false); }
+    };
 
     useEffect(() => {
         if (!user?.is_superuser) { navigate('/dashboard'); return; }
@@ -657,6 +710,8 @@ const AdminPage = () => {
         { key: 'dashboard', label: '📊 Dashboard' },
         { key: 'users', label: '👥 Users' },
         { key: 'audit', label: '📋 Audit Logs' },
+        { key: 'otps', label: '🔑 Active PINs' },
+        { key: 'settings', label: '⚙️ Settings' },
     ];
 
     return (
@@ -699,6 +754,88 @@ const AdminPage = () => {
                 {activeTab === 'dashboard' && <DashboardTab stats={stats} auditLogs={auditLogs} loadingStats={loadingStats} />}
                 {activeTab === 'users' && <UsersTab currentUser={user} show={show} />}
                 {activeTab === 'audit' && <AuditLogsTab show={show} />}
+                
+                {activeTab === 'otps' && (
+                    <div style={{ background: '#1e1e46', borderRadius: 16, border: '1px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>
+                        <div style={{ padding: '24px', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'white' }}>Active Verification PINs</h2>
+                        </div>
+                        <div style={{ overflowX: 'auto' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                                <thead>
+                                    <tr style={{ background: 'rgba(0,0,0,0.2)', color: '#9ca3af', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 }}>
+                                        <th style={{ padding: '16px 24px', fontWeight: 600 }}>Email</th>
+                                        <th style={{ padding: '16px 24px', fontWeight: 600 }}>PIN</th>
+                                        <th style={{ padding: '16px 24px', fontWeight: 600 }}>Expires At</th>
+                                    </tr>
+                                </thead>
+                                <tbody style={{ fontSize: 13 }}>
+                                    {otps.length === 0 ? (
+                                        <tr><td colSpan="3" style={{ padding: '40px 24px', textAlign: 'center', color: '#6b7280' }}>No active PINs found.</td></tr>
+                                    ) : (
+                                        otps.map((otp) => (
+                                            <tr key={otp.id} style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                                                <td style={{ padding: '16px 24px', fontWeight: 500, color: '#e5e7eb' }}>{otp.email}</td>
+                                                <td style={{ padding: '16px 24px' }}>
+                                                    <span style={{ background: 'rgba(99,102,241,0.2)', color: '#818cf8', padding: '4px 8px', borderRadius: 6, fontFamily: 'monospace', fontSize: 14, fontWeight: 700, letterSpacing: 2 }}>{otp.pin}</span>
+                                                </td>
+                                                <td style={{ padding: '16px 24px', color: '#9ca3af' }}>{new Date(otp.expires_at).toLocaleString()}</td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
+                
+                {activeTab === 'settings' && (
+                    <div style={{ background: '#1e1e46', borderRadius: 16, border: '1px solid rgba(255,255,255,0.1)', padding: 32 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'white' }}>AI Configuration Settings</h2>
+                            <button onClick={saveConfigs} disabled={savingConfigs} style={{ padding: '10px 20px', background: '#6366f1', color: 'white', border: 'none', borderRadius: 8, cursor: savingConfigs ? 'not-allowed' : 'pointer', fontWeight: 600, opacity: savingConfigs ? 0.7 : 1 }}>
+                                {savingConfigs ? 'Saving...' : 'Save Settings'}
+                            </button>
+                        </div>
+                        
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+                            {configs.map((c) => (
+                                <div key={c.key}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                        <label style={{ fontSize: 14, fontWeight: 600, color: '#e5e7eb', textTransform: 'capitalize' }}>
+                                            {c.key.replace(/_/g, ' ')}
+                                        </label>
+                                        <button 
+                                            onClick={() => saveSingleConfig(c)}
+                                            disabled={savingConfigs}
+                                            style={{ padding: '6px 14px', background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, cursor: savingConfigs ? 'not-allowed' : 'pointer', fontSize: 12, fontWeight: 600, transition: 'all 0.2s' }}
+                                        >
+                                            Save
+                                        </button>
+                                    </div>
+                                    {c.key.includes('prompt') ? (
+                                        <textarea
+                                            value={c.value}
+                                            onChange={(e) => handleConfigChange(c.key, e.target.value)}
+                                            rows={8}
+                                            style={{ width: '100%', padding: 16, background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, color: '#d1d5db', fontFamily: 'monospace', fontSize: 13, resize: 'vertical', outline: 'none' }}
+                                            placeholder={`Leave blank to use default hardcoded ${c.key}...`}
+                                        />
+                                    ) : (
+                                        <input
+                                            type={c.key.includes('key') ? 'password' : 'text'}
+                                            value={c.value}
+                                            onChange={(e) => handleConfigChange(c.key, e.target.value)}
+                                            style={{ width: '100%', padding: 16, background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, color: '#d1d5db', fontFamily: 'monospace', fontSize: 13, outline: 'none' }}
+                                            placeholder={`Leave blank to use default...`}
+                                        />
+                                    )}
+                                    {c.description && <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 8 }}>{c.description}</p>}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );

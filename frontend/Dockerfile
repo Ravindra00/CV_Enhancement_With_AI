@@ -14,8 +14,12 @@ COPY . .
 # Build the app
 RUN npm run build
 
-# Expose port
-EXPOSE 3000
+# Serve with Nginx
+FROM nginx:alpine
+COPY --from=0 /app/build /usr/share/nginx/html
 
-# Start the app
-CMD ["npm", "start"]
+# Expose port
+EXPOSE 80
+
+# Start Nginx
+CMD ["nginx", "-g", "daemon off;"]

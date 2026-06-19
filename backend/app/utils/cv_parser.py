@@ -1,134 +1,800 @@
 """
-CV Text Extraction and Parsing Module
-Supports PDF (via pdfplumber) and DOCX (via python-docx).
-Handles multilingual CVs: English, German, French, Spanish, etc.
+CV Parser — extracts all fields from German/English CVs.
+
+Fixes in this version:
+- DATE_RANGE_RE: matches YYYY-MM, full German month names (Oktober/Maerz/etc.)
+- Education Layout A+B: degree on same or previous line; thesis/description bullets saved
+- _split_degree_institution: whitespace-gap detector + degree prefix check + country filter
+- _parse_languages EDV: strips "Category: " label before colon
+- _parse_certifications: joins continuation lines starting with '('
+- _split_into_sections: custom section items properly populated; ALL-CAPS strictly enforced
 """
 
 import os
 import re
 from typing import Dict, List, Any, Optional
 
+# ── Section keywords ───────────────────────────────────────────────────────────
 
-# ── Section keyword maps (multilingual) ──────────────────────────────────────
 SECTION_KEYWORDS = {
     'summary': [
-        'profil', 'profile', 'summary', 'professional summary', 'about me', 'about',
-        'objective', 'career objective', 'über mich', 'kurzprofil',
-        'zusammenfassung', 'berufsprofil', 'persönliches profil',
-        'resume summary', 'executive summary', 'profil professionnel',
-        'résumé', 'acerca de', 'perfil',
+        'berufliches profil', 'berufsprofil', 'profil', 'profile', 'summary',
+        'about me', 'über mich', 'kurzprofil', 'zusammenfassung',
+        'executive summary', 'career objective', 'objective',
     ],
     'experience': [
-        'berufserfahrung', 'erfahrung', 'beruflicher werdegang', 'arbeitserfahrung',
+        'berufserfahrung', 'beruflicher werdegang', 'arbeitserfahrung',
         'professional experience', 'work experience', 'employment history',
-        'experience', 'career history', 'work history', 'positions held',
-        'expérience professionnelle', 'expérience', 'experiencia laboral',
-        'experiencia profesional', 'esperienze lavorative',
+        'experience', 'career history', 'positions held',
     ],
     'education': [
-        'ausbildung', 'bildung', 'studium', 'schulbildung', 'qualifikationen',
-        'akademischer werdegang', 'hochschulbildung',
-        'education', 'academic background', 'qualifications',
-        'academic qualifications', 'educational background',
-        'formation', 'études', 'educación', 'formazione',
+        'akademische ausbildung', 'ausbildung', 'bildung', 'studium',
+        'akademischer werdegang', 'education', 'academic background',
+        'qualifications', 'formation',
     ],
     'skills': [
-        'kenntnisse', 'fähigkeiten', 'kompetenzen', 'it-kenntnisse',
-        'technische kenntnisse', 'soft skills', 'hard skills',
-        'skills', 'technical skills', 'core competencies', 'competencies',
-        'expertise', 'technologies', 'tools', 'languages & tools',
-        'compétences', 'habilidades', 'competenze',
+        'kenntnisse', 'fähigkeiten', 'kompetenzen', 'schlüsselkompetenzen',
+        'skills', 'technical skills', 'core competencies', 'expertise',
+        'kenntnisse und kompetenzen', 'hard skills',
+    ],
+    'soft_skills': [
+        'soft skills', 'soziale kompetenzen', 'persönliche kompetenzen',
+        'schlüsselkompetenzen', 'soziale fähigkeiten', 'personal skills',
+        'interpersonal skills', 'soft-skills',
     ],
     'certifications': [
-        'zertifikate', 'zertifizierungen', 'zertifikationen', 'qualifikationen',
-        'certifications', 'certificates', 'professional certifications',
-        'licences & certifications', 'awards & certifications',
-        'certifications & awards', 'credentials',
-        'certifications', 'diplômes', 'certificaciones',
+        'weiterbildung und zertifikate', 'zertifikate', 'zertifizierungen',
+        'weiterbildung', 'certifications', 'certificates', 'credentials',
+        'further education', 'further training',
     ],
     'languages': [
         'sprachkenntnisse', 'sprachen', 'fremdsprachen',
-        'languages', 'language skills', 'foreign languages',
-        'langues', 'idiomas', 'lingue',
+        'languages', 'language skills',
     ],
-    'projects': [
-        'projekte', 'projektarbeit', 'nebenprojekte',
-        'projects', 'personal projects', 'side projects', 'portfolio',
-        'key projects', 'notable projects',
-        'projets', 'proyectos', 'progetti',
-    ],
+    'projects': ['projekte', 'projects', 'portfolio'],
     'interests': [
-        'interessen', 'hobbys', 'hobbies', 'freizeit', 'ehrenamt', 'ehrenamtliche tätigkeit',
-        'interests', 'hobbies', 'activities', 'volunteering', 'volunteer work',
-        'extracurricular', 'community involvement', 'personal interests',
+        'interessen', 'hobbys', 'freizeit', 'interests', 'hobbies',
+        'hobbies and interests', 'freizeitaktivitäten',
     ],
-    'references': [
-        'referenzen', 'referenz',
-        'references', 'referees', 'references available upon request',
+    'volunteering': [
+        'ehrenamt', 'ehrenamtliche tätigkeit', 'volunteering', 'volunteer work',
+        'social engagement', 'gesellschaftliches engagement', 'freiwilligenarbeit',
     ],
+    'awards': [
+        'auszeichnungen', 'preise', 'ehrungen', 'awards', 'honors', 'achievements',
+        'leistungen',
+    ],
+    'publications': [
+        'publikationen', 'veröffentlichungen', 'publications', 'papers', 'articles',
+    ],
+    'conferences': [
+        'konferenzen', 'tagungen', 'kongresse', 'conferences', 'events',
+        'events and conferences', 'veranstaltungen',
+    ],
+    'references': ['referenzen', 'references'],
 }
 
-# Months in multiple languages for date parsing
+CUSTOM_HINTS = [
+    'forschungs', 'geländeerfahrung', 'tagungen', 'konferenzen',
+    'publikationen', 'publications', 'awards', 'auszeichnungen', 'engagement',
+    'ehrenamt', 'volunteering', 'preise', 'ehrungen',
+]
+
+# Sections that map to known standard keys (for use in parse_cv_text)
+KNOWN_EXTRA_SECTION_KEYS = {
+    'soft_skills', 'volunteering', 'awards', 'publications', 'conferences',
+}
+
 MONTHS = {
-    # English
+    # English abbreviations
     'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
     'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
-    # German
-    'januar': 1, 'februar': 2, 'märz': 3, 'april': 4, 'mai': 5, 'juni': 6,
-    'juli': 7, 'august': 8, 'september': 9, 'oktober': 10, 'november': 11, 'dezember': 12,
+    # German full names
+    'januar': 1, 'februar': 2, 'märz': 3, 'maerz': 3, 'april': 4, 'mai': 5,
+    'juni': 6, 'juli': 7, 'august': 8, 'september': 9, 'oktober': 10,
+    'november': 11, 'dezember': 12,
+    # German abbreviations
+    'mär': 3, 'okt': 10, 'dez': 12,
+    # English full names
+    'january': 1, 'february': 2, 'march': 3, 'june': 6, 'july': 7,
+    'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12,
+}
+
+# Matches full German month names, abbreviations, YYYY-MM, MM/YYYY, plain YYYY
+DATE_RANGE_RE = re.compile(
+    r'(\d{4}-\d{2}|\d{1,2}/\d{4}|\d{4}|'
+    r'(?:januar|februar|m\u00e4rz|maerz|april|mai|juni|juli|august|'
+    r'september|oktober|november|dezember|'
+    r'jan|feb|m\u00e4r|mar|apr|jun|jul|aug|sep|okt|nov|dez|'
+    r'january|february|march|june|july|august|september|october|november|december|'
+    r'may|oct|dec)'
+    r'\.?\s*\d{4})'
+    r'\s*(?:[\u2013\u2014\u2012\-\/]|\bto\b|\bbis\b)\s*'
+    r'(\d{4}-\d{2}|\d{1,2}/\d{4}|\d{4}|present|heute|aktuell|current|now|laufend|ongoing|'
+    r'(?:januar|februar|m\u00e4rz|maerz|april|mai|juni|juli|august|'
+    r'september|oktober|november|dezember|'
+    r'jan|feb|m\u00e4r|mar|apr|jun|jul|aug|sep|okt|nov|dez|'
+    r'january|february|march|june|july|august|september|october|november|december|'
+    r'may|oct|dec)'
+    r'\.?\s*\d{4})',
+    re.IGNORECASE,
+)
+
+EDV_KEYWORDS = [
+    'microsoft', 'ms office', 'excel', 'word', 'powerpoint', 'arcgis', 'gis',
+    'qgis', 'stata', 'spss', 'r studio', 'python', 'matlab', 'autocad',
+    'adobe', 'photoshop', 'illustrator', 'edv', 'computer', 'software',
+    'hardware', 'it-kenntnisse', 'office 365', 'remote sensing', 'fernerkundung',
+    'latex', 'programming', 'programmierung',
+]
+
+PROFICIENCY_MAP = {
+    'Native':       ['muttersprache', 'native', 'erstsprache', 'muttersprachlich'],
+    'Fluent':       ['fließend', 'fliessend', 'verhandlungssicher', 'fluent',
+                     'full professional', 'c1', 'c2'],
+    'Advanced':     ['fortgeschritten', 'advanced', 'sehr gut', 'b2', 'gute kenntnisse'],
+    'Intermediate': ['mittelstufe', 'intermediate', 'gut', 'b1', 'a2'],
+    'Basic':        ['grundkenntnisse', 'basic', 'elementary', 'beginner', 'a1'],
+}
+
+DEGREE_LINE_RE = re.compile(
+    r'^(m\.?sc|b\.?sc|m\.?a\.|b\.?a\.|phd|dr\.|dipl\.|ing\.|master|bachelor|'
+    r'diplom|doktor|magister|ll\.m|mba)\b',
+    re.IGNORECASE,
+)
+
+DEGREE_PREFIXES = (
+    'm.sc', 'b.sc', 'm.a.', 'b.a.', 'msc', 'bsc', 'phd', 'dr.',
+    'dipl.', 'ing.', 'prof.', 'master', 'bachelor', 'diplom',
+    'doktor', 'magister', 'll.m', 'mba',
+)
+
+UNI_WORDS = [
+    'university', 'universität', 'universitat', 'hochschule',
+    'college', 'school', 'institute', 'akademie', 'fachhochschule',
+    'gymnasium', 'tribhuvan', 'pokhara', 'purbanchal', 'rwth', 'eth',
+    'bayreuth', 'kathmandu', 'forestry college', 'technische universität',
+]
+
+COUNTRY_WORDS = {
+    'deutschland', 'germany', 'nepal', 'austria', 'österreich',
+    'switzerland', 'schweiz', 'uk', 'usa', 'france', 'india',
 }
 
 
+# ── File extraction ────────────────────────────────────────────────────────────
+
 def extract_text_from_file(file_path: str) -> str:
-    """Extract text from CV file. Supports PDF and DOCX."""
     ext = os.path.splitext(file_path)[1].lower()
     if ext == '.pdf':
         return _extract_pdf(file_path)
-    elif ext in ('.doc', '.docx'):
+    if ext in ('.doc', '.docx'):
         return _extract_docx(file_path)
-    else:
-        try:
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                return f.read()
-        except Exception as e:
-            raise ValueError(f"Failed to extract text: {str(e)}")
+    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        return f.read()
 
 
-def _extract_pdf(file_path: str) -> str:
+def _extract_pdf(fp: str) -> str:
     try:
         import pdfplumber
-        text_parts = []
-        with pdfplumber.open(file_path) as pdf:
+        parts = []
+        with pdfplumber.open(fp) as pdf:
             for page in pdf.pages:
                 t = page.extract_text()
                 if t:
-                    text_parts.append(t)
-        return '\n'.join(text_parts)
+                    parts.append(t)
+        return '\n'.join(parts)
     except ImportError:
-        raise ValueError("pdfplumber not installed. Run: pip install pdfplumber")
-    except Exception as e:
-        raise ValueError(f"PDF extraction failed: {str(e)}")
+        raise ValueError('pdfplumber not installed')
 
 
-def _extract_docx(file_path: str) -> str:
+def _extract_docx(fp: str) -> str:
     try:
         from docx import Document
-        doc = Document(file_path)
+        doc = Document(fp)
         return '\n'.join(p.text for p in doc.paragraphs if p.text.strip())
     except ImportError:
-        raise ValueError("python-docx not installed. Run: pip install python-docx")
-    except Exception as e:
-        raise ValueError(f"DOCX extraction failed: {str(e)}")
+        raise ValueError('python-docx not installed')
 
 
-# ── Main parser ───────────────────────────────────────────────────────────────
+# ── Section splitting ──────────────────────────────────────────────────────────
+
+def _classify_line(line: str):
+    """Return (section_type, is_standard) or (None, False)."""
+    cleaned = re.sub(r'^[\W\s]+', '', line).strip()
+    lower = cleaned.lower().rstrip(':').strip()
+    if len(lower) < 2 or len(lower) > 70:
+        return None, False
+
+    # Must be mostly alphabetic
+    alpha = len(re.sub(r'[^a-zA-Z\u00e4\u00f6\u00fc\u00c4\u00d6\u00dc\u00df\s\-&/()]', '', lower))
+    if alpha / max(len(lower), 1) < 0.55:
+        return None, False
+
+    # Standard section keywords (exact or prefix match)
+    for stype, kws in SECTION_KEYWORDS.items():
+        for kw in kws:
+            if lower == kw or lower.startswith(kw + ' ') or lower.startswith(kw):
+                return stype, True
+
+    # Custom: ALL-CAPS (every alpha char uppercase), short (≤50), no date
+    all_upper = cleaned == cleaned.upper() and bool(re.search(r'[A-Z\u00c4\u00d6\u00dc]', cleaned))
+    is_caps = all_upper and 3 < len(cleaned) <= 50 and not DATE_RANGE_RE.search(cleaned)
+    has_hint = any(h in lower for h in CUSTOM_HINTS)
+
+    if is_caps or has_hint:
+        return 'custom:' + cleaned, False
+
+    return None, False
+
+
+def _split_into_sections(lines: List[str]):
+    sections: Dict[str, tuple] = {}
+    customs: List[Dict] = []
+    cur_type: Optional[str] = None
+    cur_header = ''
+    cur_lines: List[str] = []
+    seen_standard = False  # True once we've encountered a real section
+
+    def flush():
+        nonlocal cur_type, cur_header, cur_lines
+        if not cur_type:
+            return
+        clean = list(cur_lines)
+        while clean and not clean[0]:
+            clean.pop(0)
+        while clean and not clean[-1]:
+            clean.pop()
+        if cur_type.startswith('custom:'):
+            title = cur_type[len('custom:'):]
+            items = [l for l in clean if l]
+            # Serialize items to a content string so the editor textarea is pre-filled
+            content = '\n'.join(f'• {it}' if not it.startswith(('•', '-', '*')) else it for it in items)
+            customs.append({'title': title, 'items': items, 'content': content})
+        elif cur_type not in sections:
+            sections[cur_type] = (cur_header, clean)
+        cur_type = None
+        cur_header = ''
+        cur_lines = []
+
+    for line in lines:
+        s = line.strip()
+        if not s:
+            if cur_type:
+                cur_lines.append('')
+            continue
+        stype, is_standard = _classify_line(s)
+
+        # Skip custom-section classification until at least one standard section seen
+        # This prevents the name/header block from being captured as custom
+        if stype and stype.startswith('custom:') and not seen_standard:
+            stype = None
+
+        if stype:
+            if is_standard:
+                seen_standard = True
+            flush()
+            cur_type = stype
+            cur_header = s
+        else:
+            if cur_type:
+                cur_lines.append(s)
+
+    flush()
+    return sections, customs
+
+
+# ── Date helpers ───────────────────────────────────────────────────────────────
+
+def _normalize_date(raw: str) -> str:
+    raw = raw.strip()
+    # YYYY-MM
+    m = re.match(r'^(\d{4})-(\d{2})$', raw)
+    if m:
+        return f'{m.group(1)}-{m.group(2)}'
+    # MM/YYYY
+    m = re.match(r'^(\d{1,2})/(\d{4})$', raw)
+    if m:
+        return f'{m.group(2)}-{m.group(1).zfill(2)}'
+    # YYYY
+    m = re.match(r'^(\d{4})$', raw)
+    if m:
+        return m.group(1)
+    # Month YYYY — full word lookup then 3-char fallback
+    m = re.match(
+        r'^([a-zA-Z\u00e4\u00f6\u00fc\u00c4\u00d6\u00dc\u00df]{2,12})\.?\s+(\d{4})$',
+        raw)
+    if m:
+        word = m.group(1).lower()
+        mn = MONTHS.get(word) or MONTHS.get(word[:3])
+        return f'{m.group(2)}-{str(mn).zfill(2)}' if mn else m.group(2)
+    return raw
+
+
+def _is_current(s: str) -> bool:
+    return bool(re.search(r'present|heute|aktuell|current|now|laufend|ongoing', s, re.I))
+
+
+# ── Personal info ──────────────────────────────────────────────────────────────
+
+def _extract_personal_info(text: str, lines: List[str]) -> Dict[str, str]:
+    info: Dict[str, str] = {}
+
+    m = re.search(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', text)
+    if m:
+        info['email'] = m.group()
+
+    phones = re.findall(r'(?:\+?[\d\s\-\(\)\.]{10,20})', re.sub(r'[^\d\s\-\(\)\+]', ' ', text))
+    phones = [p.strip() for p in phones if len(re.sub(r'\D', '', p)) >= 8]
+    if phones:
+        info['phone'] = phones[0].strip()
+
+    li = re.findall(r'linkedin\.com/in/([\w\-]+)', text, re.I)
+    if li:
+        info['linkedin'] = f'linkedin.com/in/{li[0]}'
+
+    gh = re.findall(r'github\.com/([\w\-]+)', text, re.I)
+    if gh:
+        info['website'] = f'github.com/{gh[0]}'
+
+    loc_m = re.search(
+        r'(M\u00fcnchen|Munich|Berlin|Frankfurt|Hamburg|K\u00f6ln|Cologne|'
+        r'Stuttgart|Vienna|Wien|Z\u00fcrich|Kathmandu|Pokhara|Nepal|London|Paris|Bayreuth)',
+        text)
+    if loc_m:
+        info['location'] = loc_m.group(0).strip()
+
+    for line in lines[:8]:
+        if re.search(r'[@\+]|\d{4}', line):
+            continue
+        words = line.split()
+        if 2 <= len(words) <= 5 and all(
+            w[0].isupper() if w and w[0].isalpha() else True for w in words
+        ):
+            info['name'] = line.strip()
+            break
+
+    return info
+
+
+# ── Experience ─────────────────────────────────────────────────────────────────
+
+def _split_role_company(text: str):
+    for sep in [' | ', '|']:
+        if sep in text:
+            idx = text.index(sep)
+            return text[:idx].strip(), text[idx + len(sep):].strip()
+    for sep in [' bei ', ' at ', ' für ', ' for ']:
+        if sep.lower() in text.lower():
+            idx = text.lower().index(sep.lower())
+            return text[:idx].strip(), text[idx + len(sep):].strip()
+    if ',' in text:
+        a, b = text.split(',', 1)
+        org = ['gmbh', 'ag', 'ltd', 'inc', 'llc', 'corp', 'office', 'center',
+               'centre', 'institut', 'organization', 'organisation', 'nepal',
+               'iucn', 'wwf', 'foundation', 'stiftung']
+        if any(w in b.lower() for w in org):
+            return a.strip(), b.strip()
+    return text.strip(), ''
+
+
+def _looks_like_role_company(s: str) -> bool:
+    if not s or len(s) > 120:
+        return False
+    if ' | ' in s:
+        return True
+    sl = s.lower()
+    orgs = ['gmbh', ' ag ', ' ltd ', ' llc ', ' inc ', 'iucn', 'wwf',
+            'stiftung', 'foundation', ' office ', ' institute ']
+    if any(o in ' ' + sl + ' ' for o in orgs):
+        return True
+    words = s.split()
+    if (2 <= len(words) <= 8
+            and all(w[0].isupper() if w and w[0].isalpha() else True for w in words)
+            and not re.search(r'[;:()\[\]{}]', s)
+            and not DATE_RANGE_RE.search(s)):
+        return True
+    return False
+
+
+def _parse_experience(lines: List[str]) -> List[Dict[str, Any]]:
+    """
+    Layout A: "Role | Company   MM/YYYY – MM/YYYY"  (date same line)
+    Layout B: "Role | Company"
+              "MM/YYYY – MM/YYYY"
+    """
+    entries = []
+    current: Optional[Dict] = None
+    bullets: List[str] = []
+    pending: Optional[str] = None
+
+    def flush():
+        nonlocal current, bullets, pending
+        if current:
+            current['description'] = '\n'.join(b for b in bullets if b)
+            entries.append(current)
+        current = None
+        bullets = []
+        pending = None
+
+    for line in lines:
+        s = line.strip()
+        if not s:
+            continue
+
+        dm = DATE_RANGE_RE.search(s)
+
+        if dm:
+            before = s[:dm.start()].strip().rstrip(',|').strip()
+            after  = s[dm.end():].strip().lstrip(',|').strip()
+
+            if before:
+                role, company = _split_role_company(before)
+            elif pending:
+                role, company = _split_role_company(pending)
+            else:
+                role, company = '', ''
+
+            flush()
+            current = {
+                'role':      role,
+                'company':   company,
+                'location':  after if after and len(after) < 60 else '',
+                'startDate': _normalize_date(dm.group(1)),
+                'endDate':   '' if _is_current(dm.group(2)) else _normalize_date(dm.group(2)),
+                'current':   _is_current(dm.group(2)),
+                'description': '',
+            }
+
+        elif current is not None:
+            if s.startswith(('\u2022', '-', '\u2013', '\u2014', '*', '\u25cf')):
+                bullets.append(s.lstrip('\u2022\-\u2013\u2014* ').strip())
+            elif _looks_like_role_company(s):
+                flush()
+                pending = s
+            elif len(s) > 5:
+                if (re.match(r'^[A-Z][a-z].{1,30},\s*[A-Z]', s)
+                        and len(s.split()) <= 6
+                        and not current.get('location')):
+                    current['location'] = s
+                else:
+                    bullets.append(s)
+        else:
+            if not s.startswith(('\u2022', '-', '\u2013', '*')):
+                pending = s
+
+    flush()
+    return entries
+
+
+# ── Education ──────────────────────────────────────────────────────────────────
+
+def _split_degree_institution(text: str):
+    """Split a degree line into (degree, institution)."""
+
+    # Pipe separator — most reliable
+    if ' | ' in text:
+        idx = text.index(' | ')
+        left  = text[:idx].strip()
+        right = text[idx + 3:].strip()
+        # right may be "Institution, City, Country" — strip trailing countries
+        right_parts = [p.strip() for p in right.split(',')]
+        right_clean = ', '.join(p for p in right_parts if p.lower() not in COUNTRY_WORDS)
+        return left, right_clean or right
+
+    # Large whitespace gap (2+ spaces) — degree and institution on same line
+    gap_m = re.search(r'(\S)\s{2,}(\S)', text)
+    if gap_m:
+        left  = text[:gap_m.start(1) + 1].strip()
+        right = text[gap_m.start(2):].strip()
+        left_l = left.lower()
+        is_deg = any(left_l.startswith(p) for p in DEGREE_PREFIXES)
+        has_uni_r = any(w in right.lower() for w in UNI_WORDS)
+        if is_deg and (has_uni_r or right):
+            # Strip trailing country from right
+            right_parts = [p.strip() for p in right.split(',')]
+            right_clean = ', '.join(p for p in right_parts if p.lower() not in COUNTRY_WORDS)
+            return left, right_clean or right
+
+    # Comma split — "M.Sc. Ecology, Universität Bayreuth, Deutschland"
+    if ',' in text:
+        parts = [p.strip() for p in text.split(',')]
+        first_lower = parts[0].lower()
+        is_deg = any(first_lower.startswith(p) for p in DEGREE_PREFIXES)
+        # Find first part containing a known university word
+        for i in range(1, len(parts)):
+            joined = ', '.join(parts[i:i + 2])
+            if any(w in joined.lower() for w in UNI_WORDS):
+                degree = ', '.join(parts[:i]).strip()
+                inst_parts = [p for p in parts[i:] if p.lower() not in COUNTRY_WORDS]
+                return degree, ', '.join(inst_parts).strip()
+        if is_deg:
+            remaining = [p for p in parts[1:] if p.lower() not in COUNTRY_WORDS]
+            if remaining:
+                return parts[0].strip(), ', '.join(remaining)
+
+    return text.strip(), ''
+
+
+def _parse_education(lines: List[str]) -> List[Dict[str, Any]]:
+    """
+    Layout A: "M.Sc. Ecology | Universität 2019 – 2025"     (degree+date same line)
+    Layout B: "M.Sc. Ecology   Universität, Land"            (degree line first)
+              "Oktober 2019 – März 2025"                     (date next line)
+              "• Masterarbeit: ..."                          (description bullets)
+    """
+    entries = []
+    current: Optional[Dict] = None
+
+    def flush():
+        nonlocal current
+        if current:
+            entries.append(dict(current))
+        current = None
+
+    def is_degree_line(s: str) -> bool:
+        return bool(DEGREE_LINE_RE.match(s.strip()))
+
+    for line in lines:
+        if not line:
+            continue
+
+        dm = DATE_RANGE_RE.search(line)
+
+        if dm:
+            before = line[:dm.start()].strip()
+            if before:
+                # Layout A — degree + date on same line
+                flush()
+                degree, inst = _split_degree_institution(before)
+                current = {
+                    'degree': degree, 'institution': inst, 'field': '',
+                    'description': '',
+                    'startDate': _normalize_date(dm.group(1)),
+                    'endDate': '' if _is_current(dm.group(2)) else _normalize_date(dm.group(2)),
+                    'grade': '',
+                }
+            elif current and not current.get('startDate'):
+                # Layout B — date line following the degree line
+                current['startDate'] = _normalize_date(dm.group(1))
+                current['endDate']   = '' if _is_current(dm.group(2)) else _normalize_date(dm.group(2))
+                # Don't flush yet — description bullets may follow
+
+        elif is_degree_line(line):
+            # New degree header — flush previous and start fresh
+            flush()
+            degree, inst = _split_degree_institution(line)
+            current = {'degree': degree, 'institution': inst, 'field': '',
+                       'description': '', 'startDate': '', 'endDate': '', 'grade': ''}
+
+        elif current:
+            # Detail lines: thesis, bullets, grade
+            clean = line.strip().lstrip('\u2022\u2013\u2014\-* ').strip()
+            if re.search(r'(note|grade|gpa|ects)', line, re.I):
+                gm = re.search(r'[\d,.]+', line)
+                if gm:
+                    current['grade'] = gm.group()
+            elif clean:
+                # Append to description (captures Masterarbeit, Schwerpunkte, etc.)
+                if current['description']:
+                    current['description'] += '\n' + clean
+                else:
+                    current['description'] = clean
+                # Also set field to first description line
+                if not current.get('field'):
+                    current['field'] = clean
+
+    flush()
+    return entries
+
+
+# ── Skills ─────────────────────────────────────────────────────────────────────
+
+def _is_category_header(line: str) -> bool:
+    s = line.strip()
+    if s.endswith(':') and 3 < len(s) < 80:
+        return True
+    if s == s.upper() and 3 < len(s) < 60 and ',' not in s:
+        return True
+    return False
+
+
+def _parse_skills(content: str) -> List[Dict[str, str]]:
+    skills, seen, cat = [], set(), ''
+    for line in content.split('\n'):
+        s = line.strip()
+        if not s:
+            continue
+        if _is_category_header(s):
+            cat = s.rstrip(':').strip()
+            continue
+        s = re.sub(r'^[\u2022\-\u2013*]\s*', '', s).strip()
+        if not s:
+            continue
+        for part in [p.strip() for p in re.split(r'[,;]', s) if p.strip()]:
+            part = part.strip('\u2022-\u2013* ')
+            if 1 < len(part) < 80 and not part.isnumeric():
+                key = part.lower()
+                if key not in seen:
+                    seen.add(key)
+                    skills.append({'name': part, 'level': '', 'category': cat})
+    return skills[:60]
+
+
+# ── Languages ──────────────────────────────────────────────────────────────────
+
+def _map_proficiency(text: str) -> str:
+    t = text.lower()
+    for level, kws in PROFICIENCY_MAP.items():
+        if any(kw in t for kw in kws):
+            return level
+    return text.strip().title() or 'Intermediate'
+
+
+def _parse_languages(lines: List[str]):
+    """Returns (languages, edv_skills)."""
+    langs, edv = [], []
+    for line in lines:
+        s = line.strip().lstrip('\u2022-\u2013 ').strip()
+        if not s:
+            continue
+        sl = s.lower()
+
+        if any(kw in sl for kw in EDV_KEYWORDS):
+            # Strip "Category Label: " prefix (e.g. "GIS Software: ArcGIS, QGIS")
+            if ':' in s:
+                s_edv = s.split(':', 1)[1].strip()
+            else:
+                s_edv = s
+            # Strip trailing " — EDV" label
+            s_edv = re.sub(r'\s*[\u2014\u2013\-]\s*edv\s*$', '', s_edv, flags=re.I).strip()
+            for p in [p.strip() for p in re.split(r'[,;]', s_edv) if p.strip()]:
+                p = p.lstrip('\u2022-\u2013 ').strip()
+                clean = re.sub(r'\s*[\u2014\u2013\-]\s*edv\s*$', '', p, flags=re.I).strip()
+                if 1 < len(clean) < 60:
+                    edv.append({'name': clean, 'level': '', 'category': 'EDV'})
+            continue
+
+        # "Language — Proficiency" or "Language: Proficiency"
+        m = re.match(
+            r'^([A-Za-z\u00e4\u00f6\u00fc\u00c4\u00d6\u00dc\u00df]+'
+            r'(?:\s[A-Za-z]+)?)\s*[:\-\u2013\u2014]\s*(.+)$', s)
+        if m:
+            lang = m.group(1).strip()
+            if lang and len(lang) < 30:
+                langs.append({'language': lang, 'proficiency': _map_proficiency(m.group(2))})
+        elif re.match(r'^[A-Za-z\u00e4\u00f6\u00fc\u00c4\u00d6\u00dc\u00df]{3,25}$', s):
+            langs.append({'language': s, 'proficiency': 'Fluent'})
+    return langs, edv
+
+
+# ── Certifications ─────────────────────────────────────────────────────────────
+
+_CERT_SKIP_RE = re.compile(
+    r'^(validation\s*(number|no\.?|#|:)|validate\s*at|https?://|www\.|'
+    r'best\u00e4tigung|zertifikat-id)',
+    re.I,
+)
+
+
+def _parse_certifications(lines: List[str]) -> List[Dict[str, str]]:
+    """
+    Handles:
+      Single-line:        "Name — Issuer 2022"
+      Parenthesised date: "Name — Issuer (Month 2022)"
+      Multi-line:         continuation lines starting with '(' are joined
+    """
+    certs: List[Dict] = []
+    raw_lines: List[str] = []
+
+    def parse_and_flush():
+        if not raw_lines:
+            return
+        full = ' '.join(raw_lines).strip()
+        raw_lines.clear()
+        if not full or _CERT_SKIP_RE.match(full):
+            return
+
+        # Extract parenthesised date (most specific)
+        display_date = ''
+        paren_m = re.search(r'\(([^)]{4,40})\)', full)
+        if paren_m:
+            pd = paren_m.group(1).strip()
+            if re.search(r'\d{4}', pd):
+                display_date = pd
+                full_clean = (full[:paren_m.start()] + full[paren_m.end():]).strip().rstrip('.')
+            else:
+                full_clean = full
+        else:
+            full_clean = full
+
+        year_m = re.search(r'\b(20\d{2}|19\d{2})\b', full_clean)
+        if not display_date:
+            display_date = year_m.group() if year_m else ''
+
+        dash_m = re.match(r'^(.+?)\s*[\u2014\u2013]\s*(.+)$', full_clean)
+        if dash_m:
+            name_part   = dash_m.group(1).strip()
+            issuer_part = re.sub(r'\b(?:20|19)\d{2}\b', '', dash_m.group(2)).strip().rstrip(',.').strip()
+            certs.append({'name': name_part, 'issuer': issuer_part, 'date': display_date})
+        elif year_m:
+            name_part = re.sub(r'\b(?:20|19)\d{2}\b', '', full_clean).strip().rstrip('\u2013\u2014,-').strip()
+            if len(name_part) > 2:
+                certs.append({'name': name_part, 'issuer': '', 'date': display_date})
+        elif len(full_clean) > 2:
+            certs.append({'name': full_clean, 'issuer': '', 'date': ''})
+
+    for line in lines:
+        s = line.strip().lstrip('\u2022-\u2013 ').strip()
+        if not s or _CERT_SKIP_RE.match(s):
+            continue
+        first_word = s.split()[0] if s.split() else ''
+        is_continuation = s.startswith('(') or (first_word and first_word[0].islower())
+        if is_continuation and raw_lines:
+            raw_lines.append(s)
+        else:
+            parse_and_flush()
+            raw_lines.append(s)
+
+    parse_and_flush()
+    return certs
+
+
+# ── Projects ───────────────────────────────────────────────────────────────────
+
+def _parse_projects(lines: List[str]) -> List[Dict[str, str]]:
+    projects, current = [], None
+    for line in lines:
+        if not line:
+            continue
+        has_url = bool(re.search(r'(https?://|github\.com/|gitlab\.com/|\bwww\.)', line, re.I))
+        is_bullet = line.startswith(('\u2022', '-', '\u2013', '*'))
+        words = line.split()
+        # Project title: all words title-case, ≤6 words, no URL, no bullet, no date
+        is_title_case = (bool(words) and all(
+            w[0].isupper() if w and w[0].isalpha() else True for w in words))
+        is_new = (
+            not is_bullet and not has_url
+            and is_title_case and len(words) <= 6
+            and len(line) < 80 and not DATE_RANGE_RE.search(line)
+        )
+        if is_new:
+            if current:
+                projects.append(current)
+            current = {'name': line, 'description': '', 'url': ''}
+        elif current:
+            um = re.search(r'(https?://\S+|github\.com/\S+|gitlab\.com/\S+)', line, re.I)
+            if um:
+                current['url'] = um.group(1)
+                rem = line[:um.start()].strip().lstrip('\u2022-\u2013* ')
+                if rem:
+                    current['description'] = (current['description'] + ' ' + rem).strip()
+            else:
+                desc = line.lstrip('\u2022-\u2013* ').strip()
+                current['description'] = (current['description'] + ' ' + desc).strip()
+    if current:
+        projects.append(current)
+    return projects
+
+
+# ── Interests ──────────────────────────────────────────────────────────────────
+
+def _parse_interests(lines: List[str]) -> List[str]:
+    interests = []
+    for line in lines:
+        s = line.strip().lstrip('\u2022-\u2013* ').strip()
+        if not s:
+            continue
+        for part in [p.strip() for p in re.split(r'[,;\u2022\u25cf]', s) if p.strip()]:
+            part = part.lstrip('\u2022-\u2013* ').strip()
+            if 1 < len(part) < 80:
+                interests.append(part)
+    return interests
+
+
+# ── Main parse ─────────────────────────────────────────────────────────────────
 
 def parse_cv_text(text: str) -> Dict[str, Any]:
-    """
-    Parse CV text into structured data.
-    Handles multilingual CVs (German, English, etc.)
-    Returns a dict matching the CVParsedData schema.
-    """
     parsed: Dict[str, Any] = {
         'personalInfo': {},
         'summary': '',
@@ -138,656 +804,96 @@ def parse_cv_text(text: str) -> Dict[str, Any]:
         'certifications': [],
         'languages': [],
         'projects': [],
+        'interests': [],
+        'custom_sections': [],
         'sectionLabels': {},
     }
 
-    lines = [l.rstrip() for l in text.split('\n')]
-    clean_lines = [l.strip() for l in lines if l.strip()]
+    lines = [l.strip() for l in text.split('\n')]
+    non_empty = [l for l in lines if l]
 
-    # ── Identify sections ─────────────────────────────────────────────────
-    sections = _split_into_sections(lines)
+    sections, customs = _split_into_sections(lines)
+    parsed['custom_sections'] = customs
+    parsed['personalInfo'] = _extract_personal_info(text, non_empty)
 
-    # ── Personal info ──────────────────────────────────────────────────────
-    parsed['personalInfo'] = _extract_personal_info(text, clean_lines, sections)
+    # Collect EDV skills from languages separately so we can merge after skills parsed
+    _edv_pending: List[Dict] = []
 
-    # ── Parse each section ────────────────────────────────────────────────
-    for section_type, (header, content_lines) in sections.items():
+    for stype, (header, content_lines) in sections.items():
         content = '\n'.join(content_lines).strip()
-        if section_type == 'summary':
-            parsed['summary'] = ' '.join(content.split())[:800]
-        elif section_type == 'experience':
+        if stype == 'summary':
+            parsed['summary'] = content[:2000]
+        elif stype == 'experience':
             parsed['experience'] = _parse_experience(content_lines)
-        elif section_type == 'education':
+        elif stype == 'education':
             parsed['education'] = _parse_education(content_lines)
-        elif section_type == 'skills':
+        elif stype == 'skills':
             parsed['skills'] = _parse_skills(content)
-        elif section_type == 'certifications':
+        elif stype == 'soft_skills':
+            # Store soft skills as skill items with category 'Soft Skills'
+            soft = _parse_skills(content)
+            for sk in soft:
+                sk['category'] = 'Soft Skills'
+            parsed['skills'] = parsed.get('skills', []) + soft
+        elif stype == 'certifications':
             parsed['certifications'] = _parse_certifications(content_lines)
-        elif section_type == 'languages':
-            parsed['languages'] = _parse_languages(content_lines)
-        elif section_type == 'projects':
+        elif stype == 'languages':
+            langs, edv = _parse_languages(content_lines)
+            parsed['languages'] = langs
+            _edv_pending.extend(edv)
+        elif stype == 'projects':
             parsed['projects'] = _parse_projects(content_lines)
+        elif stype == 'interests':
+            parsed['interests'] = _parse_interests(content_lines)
+        elif stype in KNOWN_EXTRA_SECTION_KEYS:
+            # Known extra sections (volunteering, awards, publications, conferences)
+            # → store as structured custom sections with both items and content
+            items = [l for l in content_lines if l.strip()]
+            clean_items = [l.strip().lstrip('•\-\–* ').strip() for l in items if l.strip()]
+            section_content = '\n'.join(
+                f'• {it}' if not it.startswith(('•', '-', '*')) else it
+                for it in clean_items
+            )
+            parsed['custom_sections'].append({
+                'title': header,
+                'items': clean_items,
+                'content': section_content,
+            })
+        # 'references' intentionally skipped
+
+    # Merge EDV skills after skills array is fully populated
+    if _edv_pending:
+        existing = {s['name'].lower() for s in parsed['skills']}
+        for sk in _edv_pending:
+            if sk['name'].lower() not in existing and len(sk['name']) > 1:
+                parsed['skills'].append(sk)
+                existing.add(sk['name'].lower())
 
     return parsed
 
 
-# ── Personal info extraction ──────────────────────────────────────────────────
-
-def _extract_personal_info(text: str, lines: List[str], sections: Dict = None) -> Dict[str, str]:
-    info: Dict[str, str] = {}
-
-    # Email
-    emails = re.findall(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', text)
-    if emails:
-        info['email'] = emails[0]
-
-    # Phone — handles international formats
-    phones = re.findall(
-        r'(?:\+?[\d\s\-\(\)\.]{10,20})',
-        re.sub(r'[^\d\s\-\(\)\+]', ' ', text)
-    )
-    phones = [p.strip() for p in phones if len(re.sub(r'\D', '', p)) >= 8]
-    if phones:
-        info['phone'] = phones[0].strip()
-
-    # LinkedIn
-    linkedin = re.findall(r'(?:linkedin\.com/in/|linkedin/)([\w\-]+)', text, re.IGNORECASE)
-    if linkedin:
-        info['linkedin'] = f"linkedin.com/in/{linkedin[0]}"
-    elif re.search(r'Linkedin/(\w+)', text, re.IGNORECASE):
-        m = re.search(r'Linkedin/(\w+)', text, re.IGNORECASE)
-        if m:
-            info['linkedin'] = f"linkedin.com/in/{m.group(1)}"
-
-    # GitHub
-    github = re.findall(r'github\.com/([\w\-]+)', text, re.IGNORECASE)
-    if github:
-        info['website'] = f"github.com/{github[0]}"
-
-    # Website (non-linkedin, non-github)
-    if 'website' not in info:
-        urls = re.findall(
-            r'(?:https?://)?(?:www\.)?[\w\-]+\.(?:com|io|dev|co|net|org|de|at|ch)(?:/[\w\-./]*)?',
-            text, re.IGNORECASE
-        )
-        skip = {'linkedin.com', 'github.com'}
-        clean_urls = [u for u in urls if not any(s in u.lower() for s in skip) and '.' in u]
-        if clean_urls:
-            info['website'] = clean_urls[0]
-
-    # Location — look for city + country / city + state patterns
-    location_patterns = [
-        r'([A-Z][a-zäöüÄÖÜ]+(?:\s[A-Z][a-zäöüÄÖÜ]+)*),\s*([A-Z][a-zäöüÄÖÜ]+(?:\s[A-Z][a-zäöüÄÖÜ]+)*)',
-        r'(München|Munich|Berlin|Frankfurt|Hamburg|Cologne|Köln|Stuttgart|Vienna|Zürich|London|New York|San Francisco)',
-    ]
-    for pat in location_patterns:
-        m = re.search(pat, text)
-        if m:
-            info['location'] = m.group(0)
-            break
-
-    # Name — usually first 1-2 non-empty lines before any contact info
-    for line in lines[:5]:
-        # Skip lines that contain email/phone/icon chars
-        if re.search(r'[@\+\d{4}]', line):
-            continue
-        # Skip very short lines (likely icons/symbols) or section headers
-        words = line.split()
-        if 2 <= len(words) <= 5 and all(w[0].isupper() if w else True for w in words if w.isalpha()):
-            info['name'] = line.strip()
-            break
-
-    # Job title — three-tier fallback strategy (NEVER assigns filename)
-    if 'jobTitle' not in info:
-        info['jobTitle'] = _extract_job_title(text, lines, info, sections or {})
-
-    return info
-
-
-# Known job-title keywords (case-insensitive partial match)
-_TITLE_KEYWORDS = [
-    'engineer', 'developer', 'manager', 'analyst', 'administrator',
-    'designer', 'consultant', 'architect', 'specialist', 'director',
-    'coordinator', 'lead', 'officer', 'executive', 'intern',
-    'scientist', 'researcher', 'technician', 'programmer', 'strategist',
-]
-
-
-def _extract_job_title(text: str, lines: List[str], info: Dict[str, str], sections: Dict) -> str:
-    """
-    Extract job title using three patterns in priority order.
-    Never returns a filename, file path, or extension string.
-    """
-    def _looks_like_title(candidate: str) -> bool:
-        """Return True if the string looks like a professional job title."""
-        if not candidate or len(candidate) < 3 or len(candidate) > 80:
-            return False
-        # Reject anything that looks like a file path or email
-        if re.search(r'[@\./\\]', candidate):
-            return False
-        # Reject lines with four-digit years (likely dates)
-        if re.search(r'\b\d{4}\b', candidate):
-            return False
-        # Must contain at least one alphabetic word
-        if not re.search(r'[a-zA-Z]{3,}', candidate):
-            return False
-        return True
-
-    def _contains_title_keyword(s: str) -> bool:
-        sl = s.lower()
-        return any(kw in sl for kw in _TITLE_KEYWORDS)
-
-    # ── Tier 1: line directly below the candidate name ──────────────────
-    # Common section header words that must never be accepted as a job title
-    _SECTION_HEADERS = {
-        'experience', 'education', 'skills', 'summary', 'objective',
-        'profile', 'certifications', 'certification', 'languages', 'projects',
-        'interests', 'references', 'publications', 'awards', 'work history',
-        'employment', 'qualifications', 'achievements', 'activities',
-    }
-
-    if info.get('name'):
-        name_line = info['name']
-        # Find the name among the first 5 clean lines
-        for idx, line in enumerate(lines[:5]):
-            if name_line in line:
-                # Check the next 1-2 lines
-                for offset in (1, 2):
-                    next_idx = idx + offset
-                    if next_idx < len(lines):
-                        candidate = lines[next_idx].strip()
-                        # Skip blank or re-detection of section headers
-                        if candidate.lower() in _SECTION_HEADERS:
-                            continue
-                        if _looks_like_title(candidate) and _contains_title_keyword(candidate):
-                            return candidate
-                        # Accept even without keyword if it's short and sensible
-                        if (_looks_like_title(candidate) and 3 < len(candidate) < 50
-                                and not re.search(r'\d{3,}', candidate)
-                                and candidate.lower() not in _SECTION_HEADERS):
-                            return candidate
-                break
-
-    # ── Tier 2: most recent job title from experience entries ───────────
-    exp_section = sections.get('experience', ('', []))[1] if sections else []
-    if not exp_section:
-        # Try scanning raw text for experience section lines
-        exp_section = []
-        in_exp = False
-        for line in text.split('\n'):
-            stripped = line.strip()
-            if re.search(r'experience|erfahrung|employment|work history', stripped, re.I) and len(stripped) < 40:
-                in_exp = True
-                continue
-            if in_exp and _detect_section_header(stripped) and not re.search(r'experience|erfahrung|employment|work history', stripped, re.I):
-                break
-            if in_exp:
-                exp_section.append(stripped)
-
-    for line in exp_section[:15]:
-        if not line:
-            continue
-        # Strip common date suffixes so the year doesn't cause false rejection
-        line_clean = re.sub(r'[\|,]?\s*\d{4}\s*[-–—]\s*(?:\d{4}|present|current|heute|now)\b', '', line, flags=re.I).strip()
-        line_clean = re.sub(r'\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*\d{4}\b', '', line_clean, flags=re.I).strip()
-        if line_clean and _contains_title_keyword(line_clean) and _looks_like_title(line_clean) and len(line_clean) < 70:
-            # Prefer lines that look like a role (not a company)
-            if not re.search(r'\b(Ltd|GmbH|Inc|Corp|LLC|AG|SA|PLC|SAS)\b', line_clean, re.I):
-                return line_clean.split(',')[0].split(' at ')[0].split(' bei ')[0].strip()
-
-    # ── Tier 3: role noun from Objective / Summary section ──────────────
-    summary_text = sections.get('summary', ('', []))[1] if sections else []
-    summary_blob = ' '.join(summary_text) if isinstance(summary_text, list) else str(summary_text)
-    if not summary_blob:
-        # Fall back to a simple pattern in the first 200 chars of the document
-        summary_blob = text[:200]
-    # Look for 'experienced X', 'a Y professional', 'seeking Z role'
-    patterns = [
-        r'(?:experienced|seasoned|dedicated|results[-\s]driven)?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}(?:\s+(?:' + '|'.join(_TITLE_KEYWORDS) + r'))[a-z]*)'
-        , r'(?:an?|the)\s+([A-Z][a-z]+(?:\s+[A-Z]?[a-z]+){0,3}(?:engineer|developer|manager|analyst|designer|specialist|consultant|architect|director|lead|officer|executive))',
-    ]
-    for pat in patterns:
-        m = re.search(pat, summary_blob, re.IGNORECASE)
-        if m:
-            candidate = m.group(1).strip()
-            if _looks_like_title(candidate):
-                return candidate.title()
-
-    # ── Fallback: empty (placeholder shown in UI) ────────────────────────
-    return ''
-
-
-# ── Section splitting ─────────────────────────────────────────────────────────
-
-def _split_into_sections(lines: List[str]) -> Dict[str, tuple]:
-    """
-    Identify section headers and group lines under each section.
-    Returns dict: {section_type: (header_line, [content_lines])}
-    """
-    sections: Dict[str, tuple] = {}
-    current_type: Optional[str] = None
-    current_header = ''
-    current_lines: List[str] = []
-
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            if current_type:
-                current_lines.append('')
-            continue
-
-        # Check if this line is a section header
-        detected = _detect_section_header(stripped)
-        if detected and detected not in sections:
-            # Save previous section
-            if current_type and current_lines:
-                sections[current_type] = (current_header, _clean_section_lines(current_lines))
-            current_type = detected
-            current_header = stripped
-            current_lines = []
-        else:
-            if current_type:
-                current_lines.append(stripped)
-
-    # Save last section
-    if current_type and current_lines:
-        sections[current_type] = (current_header, _clean_section_lines(current_lines))
-
-    return sections
-
-
-def _detect_section_header(line: str) -> Optional[str]:
-    """Check if a line is a known section header. Returns section type or None."""
-    # Headers are typically short, ALL CAPS or Title Case, possibly with icon prefix
-    # Strip common icon prefixes (emoji, box chars)
-    cleaned = re.sub(r'^[\W\s]+', '', line).strip()
-    lower = cleaned.lower().rstrip(':').strip()
-
-    # Must be short enough to be a header
-    if len(lower) > 60 or len(lower) < 2:
-        return None
-
-    # Must look like a header (mostly alpha chars)
-    if len(re.sub(r'[^a-zA-ZäöüÄÖÜß\s\-&]', '', lower)) < len(lower) * 0.6:
-        return None
-
-    for section_type, keywords in SECTION_KEYWORDS.items():
-        for kw in keywords:
-            if lower == kw or lower.startswith(kw) or kw == lower:
-                return section_type
-
-    return None
-
-
-def _clean_section_lines(lines: List[str]) -> List[str]:
-    # Remove leading/trailing empty lines
-    while lines and not lines[0]:
-        lines.pop(0)
-    while lines and not lines[-1]:
-        lines.pop()
-    return lines
-
-
-# ── Experience parsing ────────────────────────────────────────────────────────
-
-# Date pattern: "06/2022 – 01/2025", "April 2022 – present", "2022 – 2023"
-DATE_RANGE_RE = re.compile(
-    r'(\d{1,2}/\d{4}|\d{4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|'
-    r'januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)'
-    r'[\s.]*\d{4})'
-    r'\s*(?:[–\-—\/]|\bto\b|\bbis\b)\s*'
-    r'(\d{1,2}/\d{4}|\d{4}|present|heute|aktuell|current|'
-    r'(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|'
-    r'januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)'
-    r'[\s.]*\d{4})',
-    re.IGNORECASE
-)
-
-def _parse_experience(lines: List[str]) -> List[Dict[str, Any]]:
-    """
-    Parse experience section into structured job entries.
-    Detects job title + company lines and groups bullet points under them.
-    """
-    entries = []
-    current: Optional[Dict] = None
-    bullets: List[str] = []
-
-    def flush():
-        nonlocal current, bullets
-        if current:
-            if bullets:
-                current['description'] = '\n'.join(bullets)
-            entries.append(current)
-        current = None
-        bullets = []
-
-    for line in lines:
-        if not line:
-            continue
-
-        date_match = DATE_RANGE_RE.search(line)
-
-        # Line with a date range — likely a job header
-        if date_match:
-            start_raw = date_match.group(1)
-            end_raw = date_match.group(2)
-
-            # Extract title/company from the same line (before the date)
-            before_date = line[:date_match.start()].strip().rstrip(',').strip()
-            after_date = line[date_match.end():].strip()
-
-            # Try to split "Title, Company" or "Title · Company"
-            role, company = _split_title_company(before_date)
-
-            flush()
-            current = {
-                'role': role,
-                'company': company,
-                'location': after_date if after_date else '',
-                'startDate': _normalize_date(start_raw),
-                'endDate': '' if re.search(r'present|heute|aktuell|current', end_raw, re.I) else _normalize_date(end_raw),
-                'current': bool(re.search(r'present|heute|aktuell|current', end_raw, re.I)),
-                'description': '',
-            }
-        elif current is None and line and not line.startswith('•') and not line.startswith('-'):
-            # Could be company/title line without date on same line
-            role, company = _split_title_company(line)
-            if role:
-                current = {
-                    'role': role,
-                    'company': company,
-                    'location': '',
-                    'startDate': '',
-                    'endDate': '',
-                    'current': False,
-                    'description': '',
-                }
-        elif current is not None:
-            # Detect location line (city, country/state pattern)
-            if re.match(r'^[A-Z][a-z].*,\s*[A-Z]', line) and len(line.split()) <= 6:
-                if not current.get('location'):
-                    current['location'] = line
-            # Bullet point
-            elif line.startswith(('•', '-', '–', '*', '\u2022', '\u25cf')):
-                bullets.append(line.lstrip('•-–* ').strip())
-            elif len(line) > 15:
-                bullets.append(line)
-
-    flush()
-    return entries
-
-
-def _split_title_company(text: str) -> tuple:
-    """Split 'Job Title, Company Name' into (role, company)."""
-    if not text:
-        return '', ''
-    # Try comma split: "Title, Company"
-    for sep in [',', ' bei ', ' at ', ' @', ' – ', ' — ', '·']:
-        if sep.lower() in text.lower():
-            idx = text.lower().index(sep.lower())
-            role = text[:idx].strip().strip('"\'')
-            company = text[idx + len(sep):].strip().strip('"\'')
-            if role and company:
-                return role, company
-    return text.strip(), ''
-
-
-def _normalize_date(raw: str) -> str:
-    """Convert various date formats to YYYY-MM."""
-    raw = raw.strip()
-    # Already in MM/YYYY format
-    m = re.match(r'^(\d{1,2})/(\d{4})$', raw)
-    if m:
-        return f"{m.group(2)}-{m.group(1).zfill(2)}"
-    # Just a year
-    m = re.match(r'^(\d{4})$', raw)
-    if m:
-        return m.group(1)
-    # Month name + year (e.g. "April 2022", "April.2022")
-    m = re.match(r'^([a-zA-ZäöüÄÖÜ]+)[\s.]+(\d{4})$', raw)
-    if m:
-        month_name = m.group(1).lower()
-        year = m.group(2)
-        month_num = MONTHS.get(month_name[:3])
-        if month_num:
-            return f"{year}-{str(month_num).zfill(2)}"
-        return year
-    return raw
-
-
-# ── Education parsing ─────────────────────────────────────────────────────────
-
-def _parse_education(lines: List[str]) -> List[Dict[str, str]]:
-    entries = []
-    current: Optional[Dict] = None
-
-    def flush():
-        if current:
-            entries.append(current)
-
-    for line in lines:
-        if not line:
-            continue
-        date_match = DATE_RANGE_RE.search(line)
-        if date_match:
-            flush()
-            before = line[:date_match.start()].strip()
-            degree, institution = _split_degree_institution(before)
-            start_raw = date_match.group(1)
-            end_raw = date_match.group(2)
-            current = {
-                'institution': institution,
-                'degree': degree,
-                'field': '',
-                'startDate': _normalize_date(start_raw),
-                'endDate': '' if re.search(r'present|heute|current', end_raw, re.I) else _normalize_date(end_raw),
-                'grade': '',
-            }
-        elif current and re.search(r'(note|grade|gpa|ects|abschluss)', line, re.I):
-            grade_m = re.search(r'[\d,\.]+', line)
-            if grade_m:
-                current['grade'] = grade_m.group()
-        elif not current and line:
-            degree, institution = _split_degree_institution(line)
-            if degree or institution:
-                current = {
-                    'institution': institution,
-                    'degree': degree,
-                    'field': '',
-                    'startDate': '',
-                    'endDate': '',
-                    'grade': '',
-                }
-
-    flush()
-    return entries
-
-
-def _split_degree_institution(text: str) -> tuple:
-    """Split 'Degree, Institution' into components."""
-    if not text:
-        return '', ''
-    for sep in [',', ' an der ', ' at ', ' – ', ' — ', '·']:
-        if sep.lower() in text.lower():
-            idx = text.lower().index(sep.lower())
-            a = text[:idx].strip()
-            b = text[idx + len(sep):].strip()
-            # Heuristic: institution tends to have "University", "Institut", "School" etc.
-            uni_words = ['university', 'universität', 'hochschule', 'college', 'school',
-                         'institute', 'akademie', 'fachhochschule', 'gymnasium', 'berufsschule']
-            if any(w in b.lower() for w in uni_words):
-                return a, b
-            elif any(w in a.lower() for w in uni_words):
-                return b, a
-            return a, b
-    return text, ''
-
-
-# ── Skills parsing ────────────────────────────────────────────────────────────
-
-def _parse_skills(content: str) -> List[Dict[str, str]]:
-    """Extract skill tokens from a skills section."""
-    # Remove common label prefixes like "Datenbanken:" or "Sprachen:"
-    content = re.sub(r'^[^:]{1,30}:\s*', '', content, flags=re.MULTILINE)
-    # Split by common delimiters
-    raw_skills = re.split(r'[,|•·\n\t\/]+', content)
-    skills = []
-    for s in raw_skills:
-        s = s.strip().strip('•-–* ')
-        # Skip empty, too long (sentences), or purely numeric
-        if 1 < len(s) < 50 and not s.isnumeric():
-            skills.append({'name': s, 'level': '', 'category': ''})
-    # Deduplicate while preserving order
-    seen = set()
-    result = []
-    for skill_obj in skills:
-        key = skill_obj['name'].lower()
-        if key not in seen:
-            seen.add(key)
-            result.append(skill_obj)
-    return result[:30]
-
-
-# ── Certifications parsing ────────────────────────────────────────────────────
-
-def _parse_certifications(lines: List[str]) -> List[Dict[str, str]]:
-    certs = []
-    for line in lines:
-        if not line:
-            continue
-        date_m = re.search(r'\d{4}', line)
-        date = date_m.group() if date_m else ''
-        name = line[:date_m.start()].strip().rstrip('–—-,') if date_m else line
-        if len(name) > 2:
-            certs.append({'name': name.strip(), 'issuer': '', 'date': date})
-    return certs
-
-
-# ── Languages parsing ─────────────────────────────────────────────────────────
-
-PROFICIENCY_KEYWORDS = {
-    'Native': ['muttersprache', 'native', 'erstsprache', 'muttersprachlich'],
-    'Fluent': ['fließend', 'verhandlungssicher', 'fluent', 'full professional', 'c1', 'c2'],
-    'Advanced': ['fortgeschritten', 'advanced', 'sehr gut', 'upper intermediate', 'b2'],
-    'Intermediate': ['mittelstufe', 'intermediate', 'gut', 'gute kenntnisse', 'b1', 'a2'],
-    'Basic': ['grundkenntnisse', 'basic', 'elementary', 'beginner', 'a1'],
-}
-
-def _parse_languages(lines: List[str]) -> List[Dict[str, str]]:
-    langs = []
-    for line in lines:
-        if not line:
-            continue
-        # Common format: "English – Fluent" or "English: C1"
-        m = re.match(r'^([A-Za-zäöüÄÖÜ]+(?:\s[A-Za-z]+)?)\s*[:\-–—]\s*(.+)$', line)
-        if m:
-            lang_name = m.group(1).strip()
-            level_text = m.group(2).strip().lower()
-            proficiency = _map_proficiency(level_text)
-            langs.append({'language': lang_name, 'proficiency': proficiency})
-        elif re.match(r'^[A-Za-zäöüÄÖÜ]{3,20}$', line.split()[0] if line.split() else ''):
-            # Just a language name on its own line
-            lang_name = line.strip()
-            langs.append({'language': lang_name, 'proficiency': 'Fluent'})
-    return langs[:10]
-
-
-def _map_proficiency(text: str) -> str:
-    for level, keywords in PROFICIENCY_KEYWORDS.items():
-        if any(kw in text for kw in keywords):
-            return level
-    return 'Intermediate'
-
-
-# ── Projects parsing ──────────────────────────────────────────────────────────
-
-def _parse_projects(lines: List[str]) -> List[Dict[str, str]]:
-    projects = []
-    current: Optional[Dict] = None
-
-    for line in lines:
-        if not line:
-            continue
-        # A project title tends to be short and not a bullet
-        if not line.startswith(('•', '-', '–')) and len(line) < 80 and not DATE_RANGE_RE.search(line):
-            if current:
-                projects.append(current)
-            current = {'name': line, 'description': '', 'url': ''}
-        elif current:
-            url_m = re.search(r'(https?://\S+|github\.com/\S+)', line, re.I)
-            if url_m:
-                current['url'] = url_m.group(1)
-            else:
-                desc = line.lstrip('•-– ').strip()
-                current['description'] = (current['description'] + ' ' + desc).strip()
-
-    if current:
-        projects.append(current)
-    return projects
-
-
-# ── Simple fallback suggestions ───────────────────────────────────────────────
-
-def generate_suggestions(cv_data: Dict[str, Any], job_description: str) -> List[Dict[str, str]]:
-    """Simple fallback suggestions."""
+def parse_cv_file(file_path: str) -> Dict[str, Any]:
+    try:
+        raw = extract_text_from_file(file_path)
+        parsed = parse_cv_text(raw)
+        parsed['raw_text'] = raw
+        return parsed
+    except Exception as e:
+        return {
+            'personalInfo': {}, 'summary': '', 'experience': [], 'education': [],
+            'skills': [], 'certifications': [], 'languages': [], 'projects': [],
+            'interests': [], 'custom_sections': [], 'sectionLabels': {},
+            'raw_text': '', 'parse_error': str(e),
+        }
+
+
+def generate_suggestions(cv_data: Dict[str, Any], job_description: str):
     suggestions = []
     if not cv_data.get('summary'):
         suggestions.append({
             'title': 'Add a Profile Summary',
-            'description': 'A summary section helps recruiters understand your value quickly.',
+            'description': 'A summary helps recruiters understand your value quickly.',
             'suggestion': 'Write a 2-3 sentence career summary at the top of your CV.',
             'section': 'summary',
         })
     return suggestions
-
-
-# ── Main parse_cv_file function ───────────────────────────────────────────────
-
-def parse_cv_file(file_path: str) -> Dict[str, Any]:
-    """
-    Extract text from a CV file and parse it into structured data.
-    Supports PDF, DOCX, and plain text files.
-    Handles multilingual CVs (German, English, etc.)
-    
-    Returns:
-        Dict with structure:
-        {
-            'personalInfo': {...},
-            'summary': str,
-            'experience': [...],
-            'education': [...],
-            'skills': [...],
-            'certifications': [...],
-            'languages': [...],
-            'projects': [...],
-            'sectionLabels': {...},
-            'raw_text': str  # Original extracted text
-        }
-    """
-    try:
-        # Extract text from file
-        raw_text = extract_text_from_file(file_path)
-        
-        # Parse the text into structured data
-        parsed_data = parse_cv_text(raw_text)
-        
-        # Add raw text for reference
-        parsed_data['raw_text'] = raw_text
-        
-        return parsed_data
-        
-    except Exception as e:
-        # Return empty structure on error so upload doesn't completely fail
-        return {
-            'personalInfo': {},
-            'summary': '',
-            'experience': [],
-            'education': [],
-            'skills': [],
-            'certifications': [],
-            'languages': [],
-            'projects': [],
-            'sectionLabels': {},
-            'raw_text': '',
-            'parse_error': str(e)
-        }

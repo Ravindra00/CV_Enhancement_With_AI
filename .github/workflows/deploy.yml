@@ -1,0 +1,118 @@
+name: Deploy CV Enhancer
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install Dependencies
+        working-directory: ./frontend
+        run: npm ci || npm install
+
+      - name: Build Frontend
+        working-directory: ./frontend
+        env:
+          REACT_APP_API_URL: http://${{ secrets.APP_SERVER_IP }}:8000/api
+        run: npm run build
+
+      - name: Prepare Temp Directory on Target
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.WEB_SERVER_IP }}
+          username: opc
+          key: ${{ secrets.WEB_SSH_KEY }}
+          script: |
+            mkdir -p /tmp/frontend-deploy
+            rm -rf /tmp/frontend-deploy/*
+
+      - name: Copy Build to Web Server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.WEB_SERVER_IP }}
+          username: opc
+          key: ${{ secrets.WEB_SSH_KEY }}
+          source: "frontend/build"
+          target: "/tmp/frontend-deploy"
+          strip_components: 1
+
+      - name: Deploy and Restart Web Server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.WEB_SERVER_IP }}
+          username: opc
+          key: ${{ secrets.WEB_SSH_KEY }}
+          script: |
+            sudo rm -rf /opt/frontend/*
+            sudo mkdir -p /opt/frontend
+            sudo cp -r /tmp/frontend-deploy/build/* /opt/frontend/
+            sudo chown -R opc:opc /opt/frontend
+            sudo systemctl restart frontend.service
+
+  deploy-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Prepare Temp Directory on Target
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.APP_SERVER_IP }}
+          username: opc
+          key: ${{ secrets.APP_SSH_KEY }}
+          script: |
+            mkdir -p /tmp/backend-deploy
+            rm -rf /tmp/backend-deploy/*
+
+      - name: Copy Backend to App Server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.APP_SERVER_IP }}
+          username: opc
+          key: ${{ secrets.APP_SSH_KEY }}
+          source: "backend"
+          target: "/tmp/backend-deploy"
+
+      - name: Deploy and Restart Backend Service
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.APP_SERVER_IP }}
+          username: opc
+          key: ${{ secrets.APP_SSH_KEY }}
+          script: |
+            sudo rm -rf /opt/backend
+            sudo mv /tmp/backend-deploy/backend /opt/backend
+            sudo chown -R opc:opc /opt/backend
+            
+            # Setup .env
+            cat << 'EOF' | sudo tee /opt/backend/.env
+            DB_HOST=10.0.1.62
+            DB_USER=admin
+            DB_PASSWORD=${{ secrets.DB_PASS }}
+            DB_NAME=antigravity
+            OPENAI_API_KEY=
+            GROQ_API_KEY=
+            FRONTEND_URL="http://${{ secrets.WEB_SERVER_IP }}"
+            DATABASE_URL="mysql+pymysql://admin:${{ secrets.DB_PASS }}@10.0.1.62:3306/antigravity"
+            EOF
+            
+            # Install dependencies
+            python3 -m pip install --user -r /opt/backend/requirements.txt
+            
+            # Ensure bcrypt compatibility for passlib
+            python3 -m pip install --user bcrypt==4.0.1
+            
+            # Restart service
+            sudo systemctl restart fastapi.service

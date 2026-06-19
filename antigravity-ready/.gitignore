@@ -1,0 +1,20 @@
+# Terraform state — contains sensitive data
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Secrets — never commit these
+terraform.tfvars
+*.pem
+*.key
+config.env
+.env
+.env.*
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

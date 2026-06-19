@@ -432,3 +432,66 @@ def get_audit_logs(
     ]
 
     return PaginatedAuditLogsResponse(logs=log_responses, total=total, page=page, limit=limit)
+
+@router.get("/otps")
+def get_active_otps(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    from app.models import OTP
+    offset = (page - 1) * limit
+    total = db.query(OTP).count()
+    otps = db.query(OTP).order_by(OTP.created_at.desc()).offset(offset).limit(limit).all()
+    
+    return {
+        "items": [
+            {
+                "id": o.id,
+                "email": o.email,
+                "pin": o.pin,
+                "expires_at": o.expires_at,
+                "created_at": o.created_at
+            }
+            for o in otps
+        ],
+        "total": total,
+        "page": page,
+        "pages": (total + limit - 1) // limit
+    }
+
+@router.get("/configs")
+def get_configs(db: Session = Depends(get_db)):
+    from app.models import SystemConfig
+    configs = db.query(SystemConfig).all()
+    return {
+        "items": [
+            {
+                "key": c.key,
+                "value": c.value,
+                "description": c.description
+            }
+            for c in configs
+        ]
+    }
+
+@router.put("/configs")
+def update_configs(data: dict, db: Session = Depends(get_db)):
+    from app.models import SystemConfig
+    configs = data.get("configs", [])
+    for item in configs:
+        key = item.get("key")
+        value = item.get("value")
+        desc = item.get("description")
+        
+        c = db.query(SystemConfig).filter(SystemConfig.key == key).first()
+        if c:
+            c.value = value
+            if desc is not None:
+                c.description = desc
+        else:
+            new_c = SystemConfig(key=key, value=value, description=desc or "")
+            db.add(new_c)
+            
+    db.commit()
+    return {"message": "Configurations updated successfully"}

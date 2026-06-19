@@ -98,12 +98,34 @@ function extractPhrases(text, maxLen = 3) {
 function extractKeywords(jd) {
   const tokens = tokenize(jd);
   const phrases = extractPhrases(jd, 3);
-  const keywords = new Set(tokens.filter(t => !STOP_WORDS.has(t)));
+  
+  const techKeywords = new Set();
+  const generalKeywords = new Set();
+
   // Add multi-word tech phrases that appear in the JD
   for (const phrase of phrases) {
-    if (TECH_KEYWORDS.has(phrase)) keywords.add(phrase);
+    if (TECH_KEYWORDS.has(phrase)) techKeywords.add(phrase);
   }
-  return keywords;
+  
+  // Categorize single tokens
+  for (const t of tokens) {
+    if (TECH_KEYWORDS.has(t)) {
+      techKeywords.add(t);
+    } else if (t.length > 4 && !STOP_WORDS.has(t)) {
+      generalKeywords.add(t);
+    }
+  }
+
+  // To provide a realistic score, we prioritize ALL tech skills,
+  // but cap generic keywords to a maximum of 15 to prevent the denominator
+  // from artificially deflating the score.
+  const finalKeywords = new Set(techKeywords);
+  const generalArray = [...generalKeywords].slice(0, 15);
+  for (const g of generalArray) {
+    finalKeywords.add(g);
+  }
+  
+  return finalKeywords;
 }
 
 // ─── NEW: calculateATS — comprehensive ATS scoring ─────────────────────────────

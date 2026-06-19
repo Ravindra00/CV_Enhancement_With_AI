@@ -11,12 +11,13 @@ const DEFAULT_CV = {
   experiences: [],
   educations: [],
   skills: [],
+  soft_skills: [],
   certifications: [],
   languages: [],
   projects: [],
   interests: [],
   custom_sections: [],
-  theme: { primaryColor: '#1a1a1a', fontFamily: 'Inter, system-ui, sans-serif', layout: 'clean', accentStyle: 'line' },
+  theme: { primaryColor: '#1a1a1a', fontFamily: 'Inter, system-ui, sans-serif', layout: 'clean', accentStyle: 'line', pageMargin: 32, sectionSpacing: 12, columnSplit: 35 },
 };
 
 const INPUT = 'w-full border border-gray-200 dark:border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300 focus:border-primary transition bg-white dark:bg-slate-800 text-gray-900 dark:text-slate-100 placeholder:text-gray-400 dark:placeholder:text-slate-500';
@@ -34,37 +35,92 @@ function useDebounce(value, delay) {
 
 /* ─── Sub-components ─── */
 const SkillsInput = ({ skills, onChange }) => {
+  const onSuggestSkills = null;
+  const suggestedSkills = [];
+  const onAddSuggested = null;
+  const suggestingSkills = false;
   const [input, setInput] = useState('');
+  const [category, setCategory] = useState('');
   const add = () => {
     const s = input.trim();
-    if (s) {
-      const skillObj = { name: s, level: '', category: '' };
-      const skillNames = skills.map(sk => typeof sk === 'string' ? sk : sk.name);
-      if (!skillNames.includes(s)) onChange([...skills, skillObj]);
-      setInput('');
+    const c = category.trim();
+    if (!s) return;
+    const names = skills.map(sk => typeof sk === 'string' ? sk : sk.name);
+    if (!names.includes(s)) {
+      onChange([...skills, { name: s, level: '', category: c }]);
     }
+    setInput('');
   };
+  
+  // Group skills by category for display
+  const grouped = skills.reduce((acc, skill) => {
+    const cat = skill.category || '';
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(skill);
+    return acc;
+  }, {});
+
+  const updateCategory = (oldCat, newCat) => {
+    const updated = skills.map(s => (s.category || '') === oldCat ? { ...s, category: newCat } : s);
+    onChange(updated);
+  };
+
   return (
     <div>
       <div className="flex gap-2 mb-2">
-        <input className={INPUT} placeholder="Add skill…" value={input} onChange={e => setInput(e.target.value)}
+        <input className={INPUT} placeholder="Skill name…" value={input}
+          onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
-        <button onClick={add} className="px-3 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-700 transition">+</button>
+        <input className={INPUT} placeholder="Category / Subheading (optional)…" value={category}
+          onChange={e => setCategory(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
+        <button onClick={add} className="px-3 py-2 bg-primary text-white rounded-lg text-sm font-semibold hover:bg-primary-700 transition">+</button>
+        {onSuggestSkills && (
+          <button onClick={onSuggestSkills} disabled={suggestingSkills} className="px-3 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-lg text-sm font-semibold transition flex items-center gap-1">
+            {suggestingSkills ? <><svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>...</> : <>✦ Suggest</>}
+          </button>
+        )}
       </div>
-      <div className="flex flex-wrap gap-1.5">
-        {skills.map((s, i) => {
-          const skillName = typeof s === 'string' ? s : s.name;
-          return (
-            <span key={i} className="flex items-center gap-1 bg-primary-50 text-primary border border-primary-200 rounded-full px-3 py-0.5 text-xs font-medium">
-              {skillName}<button onClick={() => onChange(skills.filter((_, j) => j !== i))} className="hover:text-red-500 ml-0.5">×</button>
-            </span>
-          );
-        })}
+      {suggestedSkills && suggestedSkills.length > 0 && (
+        <div className="mb-3 p-3 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg">
+          <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 mb-2">💡 Suggested Skills (click to add):</p>
+          <div className="flex flex-wrap gap-1.5">
+            {suggestedSkills.map((skill, i) => (
+              <button key={i} onClick={() => onAddSuggested(skill)}
+                className="text-xs bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600 px-2.5 py-1 rounded-full hover:bg-amber-200 dark:hover:bg-amber-800 transition cursor-pointer">
+                + {skill}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="space-y-3">
+        {Object.entries(grouped).map(([cat, catSkills], i) => (
+          <div key={i} className="p-2 border border-gray-100 dark:border-slate-700 rounded-lg bg-gray-50 dark:bg-slate-800">
+            <input 
+              className="text-xs font-bold text-gray-700 dark:text-slate-300 bg-transparent border-b border-dashed border-gray-300 dark:border-slate-600 focus:outline-none mb-2 w-full max-w-[200px]" 
+              value={cat} 
+              placeholder="No Category"
+              onChange={e => updateCategory(cat, e.target.value)} 
+            />
+            <div className="flex flex-wrap gap-1.5">
+              {catSkills.map((s, j) => {
+                const name = typeof s === 'string' ? s : s.name;
+                const globalIndex = skills.findIndex(sk => (typeof sk === 'string' ? sk : sk.name) === name);
+                return (
+                  <span key={j} className="flex items-center gap-1 bg-primary-50 text-primary border border-primary-200 rounded-full px-3 py-0.5 text-xs font-medium">
+                    {name}
+                    <button onClick={() => onChange(skills.filter((_, idx) => idx !== globalIndex))} className="hover:text-red-500 ml-0.5">×</button>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
 };
-
 /* ─── Main Editor ─── */
 const CVEditorPage = () => {
   const params = useParams();
@@ -78,7 +134,7 @@ const CVEditorPage = () => {
   const [saved, setSaved] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [open, setOpen] = useState({ personal: true, summary: false, experience: false, education: false, skills: false, certs: false, languages: false, projects: false, interests: false, custom: false });
+  const [open, setOpen] = useState({ personal: true, summary: false, experience: false, education: false, skills: false, softSkills: false, certs: false, languages: false, projects: false, interests: false, custom: false });
   const [photoUploading, setPhotoUploading] = useState(false);
   const photoRef = useRef();
 
@@ -149,17 +205,34 @@ const CVEditorPage = () => {
         return [];
       })();
 
+      // Split soft skills (category === 'Soft Skills') from regular skills
+      const allSkills = normalizedSkills;
+      const regularSkills = allSkills.filter(s => (s.category || '').toLowerCase() !== 'soft skills');
+      const softSkillItems = allSkills.filter(s => (s.category || '').toLowerCase() === 'soft skills');
+
+      // Normalize custom_sections: ensure content is pre-filled from items
+      const normalizedCustomSections = Array.isArray(d.custom_sections)
+        ? d.custom_sections.map(cs => {
+            const title = cs.title || '';
+            const items = Array.isArray(cs.items) ? cs.items : [];
+            const content = cs.content || (items.length > 0 ? items.map(it => `• ${it}`).join('\n') : '');
+            const isImported = items.length > 0; // flag for UI badge
+            return { title, items, content, isImported };
+          })
+        : [];
+
       setCvData({
         ...DEFAULT_CV,
         personal_info: { ...DEFAULT_CV.personal_info, ...(d.personal_info || {}) },
         experiences: normalizedExperiences,
         educations: normalizedEducations,
-        skills: normalizedSkills,
+        skills: regularSkills,
+        soft_skills: softSkillItems,
         certifications: Array.isArray(d.certifications) ? d.certifications : [],
         languages: Array.isArray(d.languages) ? d.languages : [],
         projects: Array.isArray(d.projects) ? d.projects : [],
         interests: Array.isArray(d.interests) ? d.interests : [],
-        custom_sections: Array.isArray(d.custom_sections) ? d.custom_sections : [],
+        custom_sections: normalizedCustomSections,
         theme: (d.theme && typeof d.theme === 'object' && d.theme.primaryColor)
           ? d.theme
           : DEFAULT_CV.theme,
@@ -183,7 +256,11 @@ const CVEditorPage = () => {
     personal_info: data.personal_info,
     experiences: data.experiences,
     educations: data.educations,
-    skills: data.skills,
+    // Merge regular skills + soft skills (tagged with category) into one array
+    skills: [
+      ...(data.skills || []),
+      ...(data.soft_skills || []).map(s => ({ ...s, category: 'Soft Skills' })),
+    ],
     certifications: data.certifications,
     languages: data.languages,
     projects: data.projects,
@@ -283,12 +360,25 @@ const CVEditorPage = () => {
   };
   const removeInterest = i => setCvData(prev => ({ ...prev, interests: (prev.interests || []).filter((_, j) => j !== i) }));
 
+  /* Soft Skills helpers */
+  const addSoftSkill = (name) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const existing = (cvData.soft_skills || []).map(s => (typeof s === 'string' ? s : s?.name || '').toLowerCase());
+    if (!existing.includes(trimmed.toLowerCase())) {
+      setCvData(prev => ({ ...prev, soft_skills: [...(prev.soft_skills || []), { name: trimmed, level: '', category: 'Soft Skills' }] }));
+    }
+  };
+  const removeSoftSkill = i => setCvData(prev => ({ ...prev, soft_skills: (prev.soft_skills || []).filter((_, j) => j !== i) }));
+
   /* Custom section helpers */
-  const addCustomSection = () => setCvData(prev => ({ ...prev, custom_sections: [...(prev.custom_sections || []), { title: '', content: '' }] }));
+  const addCustomSection = () => setCvData(prev => ({ ...prev, custom_sections: [...(prev.custom_sections || []), { title: '', content: '', items: [], isImported: false }] }));
   const removeCustomSection = i => setCvData(prev => ({ ...prev, custom_sections: (prev.custom_sections || []).filter((_, j) => j !== i) }));
   const updateCustomSection = (i, field, val) => setCvData(prev => {
     const cs = [...(prev.custom_sections || [])];
     cs[i] = { ...cs[i], [field]: val };
+    // If user edits content, clear isImported flag (content is now manually edited)
+    if (field === 'content') cs[i].isImported = false;
     return { ...prev, custom_sections: cs };
   });
 
@@ -324,6 +414,7 @@ const CVEditorPage = () => {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => navigate(`/cv/${id}/design`)} className="px-3 py-1.5 bg-pink-50 dark:bg-pink-950 text-pink-700 dark:text-pink-300 border border-pink-200 dark:border-pink-800 text-xs font-semibold rounded-lg hover:bg-pink-100 dark:hover:bg-pink-900 transition">🎨 Design</button>
           {canUseAI ? (
             <button onClick={() => navigate(`/cv/${id}/customize`)} className="px-3 py-1.5 bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 text-xs font-semibold rounded-lg hover:bg-amber-200 dark:hover:bg-amber-800 transition">✨ AI Enhance</button>
           ) : (
@@ -343,7 +434,7 @@ const CVEditorPage = () => {
             onClick={async () => {
               setExporting(true);
               try { await cvAPI.update(id, buildPayload(cvData, title)); } catch (_) {}
-              try { await exportCVAsPDF(title || 'CV'); } catch (e) { console.error(e); }
+              try { await exportCVAsPDF(title || 'CV', { footerLabel: cvData?.personal_info?.name || title || 'CV' }); } catch (e) { console.error(e); }
               setExporting(false);
             }}
             className="px-3 py-1.5 bg-primary text-white text-xs font-semibold rounded-lg hover:bg-primary-700 disabled:opacity-60 transition flex items-center gap-1"
@@ -426,24 +517,20 @@ const CVEditorPage = () => {
                 {piInput('Email', 'email', 'email@example.com')}
                 {piInput('Phone', 'phone', '+49 123 456789')}
                 {piInput('Location', 'location', 'Munich, Germany')}
-                {piInput('LinkedIn', 'linkedin', 'linkedin.com/in/you')}
-                {piInput('Website', 'website', 'yourwebsite.com')}
+                {piInput('LinkedIn / Website', 'linkedin', 'linkedin.com/in/you')}
+                {piInput('Website / Portfolio', 'website', 'yourwebsite.com')}
+              </div>
+              {/* Profile Summary — parity with AI editor */}
+              <div>
+                <label className={LABEL}>Profile Summary</label>
+                <p className="text-xs text-gray-400 dark:text-slate-500 mb-1.5">Write a compelling 2–3 sentence summary</p>
+                <textarea className={TEXTAREA} rows={4} placeholder="Experienced software engineer with 5+ years…"
+                  value={cvData.personal_info?.summary || ''} onChange={e => updatePI('summary', e.target.value)} />
               </div>
             </div>
           )}
 
-          {/* Theme Panel */}
-          <ThemePanel theme={theme} onThemeChange={setTheme} />
 
-          {/* Summary */}
-          <SectionHeader k="summary" label="Profile Summary" def="Profile Summary" />
-          {open.summary && (
-            <div className="pt-1">
-              <p className="text-xs text-gray-400 dark:text-slate-500 mb-1.5">Write a compelling 2–3 sentence summary</p>
-              <textarea className={TEXTAREA} rows={4} placeholder="Experienced software engineer with 5+ years…"
-                value={cvData.personal_info?.summary || ''} onChange={e => updatePI('summary', e.target.value)} />
-            </div>
-          )}
 
           {/* Experience */}
           <SectionHeader k="experience" label="Experience" />
@@ -504,6 +591,46 @@ const CVEditorPage = () => {
           {open.skills && (
             <div className="pt-1">
               <SkillsInput skills={cvData.skills || []} onChange={v => update('skills', v)} />
+            </div>
+          )}
+
+          {/* Soft Skills */}
+          <SectionHeader k="softSkills" label="Soft Skills" />
+          {open.softSkills && (
+            <div className="pt-1">
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {(cvData.soft_skills || []).map((s, i) => {
+                  const name = typeof s === 'string' ? s : s?.name || '';
+                  return name ? (
+                    <span key={i} className="flex items-center gap-1 bg-violet-50 dark:bg-violet-950 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-700 rounded-full px-3 py-0.5 text-xs font-medium">
+                      {name}
+                      <button onClick={() => removeSoftSkill(i)} className="hover:text-red-500 ml-0.5">×</button>
+                    </span>
+                  ) : null;
+                })}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  className={INPUT}
+                  placeholder="e.g. Team leadership, Communication…"
+                  id="soft-skill-input"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addSoftSkill(e.target.value);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    const el = document.getElementById('soft-skill-input');
+                    if (el) { addSoftSkill(el.value); el.value = ''; }
+                  }}
+                  className="px-3 py-2 bg-violet-500 text-white rounded-lg text-sm font-medium hover:bg-violet-600 transition"
+                >+</button>
+              </div>
+              <p className="text-xs text-gray-400 dark:text-slate-500 mt-1">Press Enter or click + to add</p>
             </div>
           )}
 
@@ -600,16 +727,41 @@ const CVEditorPage = () => {
           <SectionHeader k="custom" label="Custom Sections" />
           {open.custom && (
             <div className="space-y-3 pt-1">
+              {(cvData.custom_sections || []).length === 0 && (
+                <p className="text-xs text-gray-400 dark:text-slate-500 italic px-1">
+                  No custom sections yet. Import a CV to auto-detect extra sections, or add one manually.
+                </p>
+              )}
               {(cvData.custom_sections || []).map((cs, i) => (
                 <div key={i} className="p-3 bg-purple-50 dark:bg-purple-950 rounded-xl border border-purple-200 dark:border-purple-800 space-y-2 relative">
-                  <button onClick={() => removeCustomSection(i)} className="absolute top-2 right-2 text-red-400 hover:text-red-600 text-xs">✕</button>
+                  <div className="flex items-center justify-between pr-6">
+                    <div className="flex items-center gap-2">
+                      {cs.isImported && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-700">
+                          📥 Imported
+                        </span>
+                      )}
+                    </div>
+                    <button onClick={() => removeCustomSection(i)} className="absolute top-2 right-2 text-red-400 hover:text-red-600 text-xs">✕</button>
+                  </div>
                   <div>
                     <label className={LABEL}>Section Title</label>
                     <input className={INPUT} placeholder="e.g. Volunteer Work, Publications, Awards…" value={cs.title || ''} onChange={e => updateCustomSection(i, 'title', e.target.value)} />
                   </div>
                   <div>
                     <label className={LABEL}>Content</label>
-                    <textarea className={TEXTAREA} rows={4} placeholder="Write the content for this section…" value={cs.content || ''} onChange={e => updateCustomSection(i, 'content', e.target.value)} />
+                    <textarea
+                      className={TEXTAREA}
+                      rows={5}
+                      placeholder="Write the content for this section… (one bullet per line, or free text)"
+                      value={cs.content || ''}
+                      onChange={e => updateCustomSection(i, 'content', e.target.value)}
+                    />
+                    {cs.isImported && (
+                      <p className="text-[10px] text-indigo-400 dark:text-indigo-500 mt-1">
+                        ✏️ Auto-imported from your CV — edit freely above.
+                      </p>
+                    )}
                   </div>
                 </div>
               ))}

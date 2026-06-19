@@ -29,6 +29,7 @@ class UserResponse(UserBase):
     is_active: bool
     is_superuser: bool = False
     ai_access: bool = True
+    is_verified: bool = False
     last_login: Optional[datetime] = None
     failed_login_attempts: int = 0
     locked_until: Optional[datetime] = None
@@ -45,6 +46,7 @@ class AdminCreateUserRequest(BaseModel):
     password: str = Field(..., min_length=6)
     is_superuser: bool = False
     ai_access: bool = True
+    is_verified: bool = False
 
 
 class AuditLogResponse(BaseModel):
@@ -82,7 +84,7 @@ class SignupRequest(UserCreate):
 
 class SignupResponse(BaseModel):
     user: UserResponse
-    access_token: str
+    access_token: Optional[str] = None
     token_type: str = "bearer"
 
 
@@ -138,6 +140,8 @@ class SkillsObject(BaseModel):
     databases: Optional[List[str]] = []
     tools: Optional[List[str]] = []
     management: Optional[List[str]] = []
+    soft_skills: Optional[List[str]] = []
+    interests: Optional[List[str]] = []
 
 
 # ───────────────────────────────────────────────────────────────
@@ -464,3 +468,19 @@ class JobApplicationResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class ScrapeJDRequest(BaseModel):
+    url: str
+
+class VerifyPinRequest(BaseModel):
+    email: EmailStr
+    pin: str
+
+
+class ConfigItem(BaseModel):
+    key: str
+    value: str
+    description: Optional[str] = None
+
+class ConfigUpdateRequest(BaseModel):
+    configs: List[ConfigItem]
