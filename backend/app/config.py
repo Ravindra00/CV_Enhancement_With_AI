@@ -3,13 +3,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import urllib.parse
+
 # Database Configuration
-# Format: mysql+pymysql://user:password@host:port/dbname
-# OCI MySQL HeatWave example: mysql+pymysql://admin:password@<your-host>:3306/cv_enhancer
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "mysql+pymysql://rabindra:ravindra@localhost:3306/cv_enhancer"
-)
+db_user = os.getenv("DB_USER", "rabindra")
+db_password = os.getenv("DB_PASSWORD", "ravindra")
+db_host = os.getenv("DB_HOST", "localhost")
+db_port = os.getenv("DB_PORT", "3306")
+db_name = os.getenv("DB_NAME", "cv_enhancer")
+
+encoded_password = urllib.parse.quote_plus(db_password)
+default_db_url = f"mysql+pymysql://{db_user}:{encoded_password}@{db_host}:{db_port}/{db_name}"
+
+DATABASE_URL = os.getenv("DATABASE_URL", default_db_url)
 
 # JWT Configuration
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")

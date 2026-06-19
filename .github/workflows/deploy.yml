@@ -130,7 +130,6 @@ jobs:
             OPENAI_API_KEY=
             GROQ_API_KEY=
             FRONTEND_URL="http://${{ secrets.WEB_SERVER_IP }}"
-            DATABASE_URL="mysql+pymysql://admin:${{ secrets.DB_PASS }}@10.0.1.62:3306/antigravity"
             EOF
             
             # Ensure bcrypt compatibility for passlib (without doing a full requirements install which OOMs the micro instance)
