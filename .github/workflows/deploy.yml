@@ -108,10 +108,7 @@ jobs:
             DATABASE_URL="mysql+pymysql://admin:${{ secrets.DB_PASS }}@10.0.1.62:3306/antigravity"
             EOF
             
-            # Install dependencies
-            python3 -m pip install --user -r /opt/backend/requirements.txt
-            
-            # Ensure bcrypt compatibility for passlib
+            # Ensure bcrypt compatibility for passlib (without doing a full requirements install which OOMs the micro instance)
             python3 -m pip install --user bcrypt==4.0.1
             
             # Restart service
