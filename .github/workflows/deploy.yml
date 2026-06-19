@@ -19,7 +19,7 @@ jobs:
 
       - name: Install Dependencies
         working-directory: ./frontend
-        run: npm ci || npm install
+        run: npm ci --legacy-peer-deps || npm install --legacy-peer-deps
 
       - name: Build Frontend
         working-directory: ./frontend
