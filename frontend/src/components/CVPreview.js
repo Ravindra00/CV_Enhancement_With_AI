@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useLayoutEffect, useRef } from 'react';
 
 
 const Icons = {
@@ -66,7 +66,7 @@ const detectGerman = (data) => {
 };
 
 const LABELS_EN = {
-    profile: 'Profile', experience: 'Work Experience', education: 'Education',
+    profile: 'Profile', experience: 'Professional Experience', education: 'Education',
     skills: 'Skills', languages: 'Languages', interests: 'Interests',
     projects: 'Projects', certifications: 'Certifications',
 };
@@ -190,6 +190,87 @@ function highlightText(text, hlSet) {
         return word;
     });
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   A4 Pagination Engine
+═══════════════════════════════════════════════════════════════ */
+const A4_HEIGHT = 1123;
+const A4_WIDTH = 794;
+
+const PagedLayout = ({ blocks, pageMargin, theme }) => {
+    const [pages, setPages] = useState([]);
+    const [measuredBlocks, setMeasuredBlocks] = useState([]);
+    const measureRef = useRef(null);
+
+    useLayoutEffect(() => {
+        if (blocks !== measuredBlocks) {
+            setPages([]);
+            setMeasuredBlocks(blocks);
+            return;
+        }
+
+        if (pages.length === 0 && measureRef.current) {
+            const pageHeight = A4_HEIGHT - (pageMargin * 2) - 10;
+            const newPages = [];
+            let currentPage = [];
+            let currentH = 0;
+
+            const children = Array.from(measureRef.current.children);
+            children.forEach((child, index) => {
+                const h = child.getBoundingClientRect().height;
+                const style = window.getComputedStyle(child);
+                const mt = parseFloat(style.marginTop) || 0;
+                const mb = parseFloat(style.marginBottom) || 0;
+                const totalH = h + mt + mb;
+
+                if (currentH + totalH > pageHeight && currentPage.length > 0) {
+                    newPages.push(currentPage);
+                    currentPage = [];
+                    currentH = 0;
+                }
+                currentPage.push(blocks[index]);
+                currentH += totalH;
+            });
+
+            if (currentPage.length > 0) {
+                newPages.push(currentPage);
+            }
+            setPages(newPages);
+        }
+    }, [blocks, measuredBlocks, pages.length, pageMargin]);
+
+    if (pages.length === 0) {
+        return (
+            <div style={{ position: 'absolute', top: -9999, left: -9999, width: A4_WIDTH, padding: `${pageMargin + 8}px ${pageMargin + 12}px ${pageMargin}px`, fontFamily: theme.fontFamily, fontSize: 14, lineHeight: '1.8' }}>
+                <div ref={measureRef}>
+                    {blocks.map((b, i) => React.isValidElement(b) ? React.cloneElement(b, { key: `measure-${i}` }) : b)}
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24, alignItems: 'center', width: '100%', background: 'transparent' }}>
+            {pages.map((pageBlocks, i) => (
+                <div key={i} style={{ 
+                    width: A4_WIDTH, 
+                    height: A4_HEIGHT, 
+                    backgroundColor: 'white', 
+                    padding: `${pageMargin + 8}px ${pageMargin + 12}px ${pageMargin}px`,
+                    fontFamily: theme.fontFamily, 
+                    fontSize: 14, 
+                    lineHeight: '1.8', 
+                    color: '#1a1a1a',
+                    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06)',
+                    position: 'relative',
+                    overflow: 'hidden'
+                }}>
+                    {pageBlocks}
+                </div>
+            ))}
+        </div>
+    );
+};
 
 /* ═══════════════════════════════════════════════════════════════
    Main CVPreview component
@@ -735,194 +816,179 @@ const CVPreview = ({ data = {}, theme: themeProp = {}, scale = 1, highlightKeywo
 
     /* ═══════════════════════════════════════════════════════
        CLEAN layout — flowcv.com-style:
-       Single column, name/title/contact header, thin gray
-       hairlines under section titles, no colored decoration.
+       Single column, name/title/contact header, thick black
+       hairlines under section titles, highly professional typography.
     ═══════════════════════════════════════════════════════ */
     if (['clean', 'twotone', 'elegant', 'tech'].includes(theme.layout)) {
-        // In clean layout every section header uses 'clean' style regardless of accentStyle setting
-        const CleanSecHeader = ({ label, iconKey }) => {
-            const Icon = Icons[iconKey] || null;
+        const CleanSecHeader = ({ label }) => {
             return (
-                <div style={{ marginBottom: 12, marginTop: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                        {Icon && <span style={{ display: 'flex', alignItems: 'center', color: '#111' }}><Icon /></span>}
-                        <span style={{ fontSize: 14, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#111' }}>{label}</span>
+                <div style={{ marginBottom: 14, marginTop: 8 }}>
+                    <div style={{ fontSize: 16, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#111', marginBottom: 6 }}>
+                        {label}
                     </div>
-                    <div style={{ height: 1.5, background: '#000' }} />
+                    <div style={{ height: 2, background: '#111' }} />
                 </div>
             );
         };
 
-        const renderCleanSection = (key) => {
-            const mar = sectionSpacing;
+        const renderCleanSectionBlocks = (key) => {
+            const mar = sectionSpacing + 4;
             if (key === 'summary' && summary) {
-                return (
-                    <div key="summary" style={{ marginBottom: mar }}>
-                        <CleanSecHeader label={L.profile} iconKey='Profile' />
-                        <p style={{ margin: 0, color: '#374151', lineHeight: '1.75', fontSize: 12 }}>
+                return [
+                    <div key="summary-hdr"><CleanSecHeader label={L.profile} /></div>,
+                    <div key="summary-content" style={{ marginBottom: mar }}>
+                        <p style={{ margin: 0, color: '#222', lineHeight: '1.8', fontSize: 14 }}>
                             {hlWords.length > 0 ? highlightText(summary, new Set(hlWords.map(w => w.toLowerCase()))) : summary}
                         </p>
                     </div>
-                );
+                ];
             }
             if (key === 'experience' && experiences.length > 0) {
-                return (
-                    <div key="experience" style={{ marginBottom: mar }}>
-                        <CleanSecHeader label={L.experience} iconKey='Experience' />
-                        {experiences.map((exp, i) => {
-                            const dateStr = [exp.startDate, exp.current ? currentLabel : exp.endDate].filter(Boolean).join(' – ');
-                            return (
-                                <div key={i} className="cv-breakable" style={{ marginBottom: 12 }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                                        <div style={{ flex: 1 }}>
-                                            <span style={{ fontSize: 12.5, fontWeight: 700, color: '#111' }}>
-                                                {exp.role || exp.position || exp.job_title || '—'}
-                                            </span>
-                                            {exp.company && <span style={{ fontSize: 12.5, fontWeight: 400, color: '#374151' }}>, {exp.company}</span>}
-                                            {exp.location && <span style={{ fontSize: 12.5, fontWeight: 400, color: '#374151' }}>, {exp.location}</span>}
-                                        </div>
-                                        {dateStr && <span style={{ fontSize: 11.5, color: '#6b7280', whiteSpace: 'nowrap', flexShrink: 0 }}>{dateStr}</span>}
+                return [
+                    <div key="exp-hdr"><CleanSecHeader label={L.experience} /></div>,
+                    ...experiences.map((exp, i) => {
+                        const dateStr = [exp.startDate, exp.current ? currentLabel : exp.endDate].filter(Boolean).join(' – ');
+                        return (
+                            <div key={`exp-${i}`} className="cv-breakable" style={{ marginBottom: i === experiences.length - 1 ? mar : 16 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                                    <div style={{ flex: 1 }}>
+                                        <span style={{ fontSize: 14.5, fontWeight: 800, color: '#111' }}>
+                                            {exp.role || exp.position || exp.job_title || '—'}
+                                        </span>
+                                        {exp.company && <span style={{ fontSize: 14.5, fontWeight: 500, color: '#333' }}>, {exp.company}</span>}
+                                        {exp.location && <span style={{ fontSize: 14.5, fontWeight: 400, color: '#444' }}>, {exp.location}</span>}
                                     </div>
-                                    {exp.description && (
-                                        <div style={{ marginTop: 4, fontSize: 12, color: '#374151', lineHeight: '1.7' }}>
-                                            {parseRichText(exp.description, hlWords)}
-                                        </div>
-                                    )}
+                                    {dateStr && <span style={{ fontSize: 13.5, color: '#444', whiteSpace: 'nowrap', flexShrink: 0 }}>{dateStr}</span>}
                                 </div>
-                            );
-                        })}
-                    </div>
-                );
+                                {exp.description && (
+                                    <div style={{ marginTop: 6, fontSize: 14, color: '#222', lineHeight: '1.8' }}>
+                                        {parseRichText(exp.description, hlWords)}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })
+                ];
             }
             if (key === 'education' && education.length > 0) {
-                return (
-                    <div key="education" style={{ marginBottom: mar }}>
-                        <CleanSecHeader label={L.education} iconKey='Education' />
-                        {education.map((edu, i) => {
-                            const dateStr = [edu.startDate, edu.endDate].filter(Boolean).join(' – ');
-                            return (
-                                <div key={i} className="cv-breakable" style={{ marginBottom: 9 }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                                        <div style={{ flex: 1 }}>
-                                            <span style={{ fontSize: 12.5, fontWeight: 700, color: '#111' }}>{edu.degree}</span>
-                                            {edu.field && <span style={{ fontSize: 12.5, fontWeight: 400, color: '#374151' }}> – {edu.field}</span>}
-                                            {edu.institution && <div style={{ fontSize: 12, color: '#374151', marginTop: 1 }}>{edu.institution}</div>}
-                                            {edu.grade && <div style={{ fontSize: 10.5, color: '#6b7280', marginTop: 1 }}>GPA: {edu.grade}</div>}
-                                        </div>
-                                        {dateStr && <span style={{ fontSize: 11.5, color: '#6b7280', whiteSpace: 'nowrap', flexShrink: 0 }}>{dateStr}</span>}
+                return [
+                    <div key="edu-hdr"><CleanSecHeader label={L.education} /></div>,
+                    ...education.map((edu, i) => {
+                        const dateStr = [edu.startDate, edu.endDate].filter(Boolean).join(' – ');
+                        return (
+                            <div key={`edu-${i}`} className="cv-breakable" style={{ marginBottom: i === education.length - 1 ? mar : 12 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                                    <div style={{ flex: 1 }}>
+                                        <span style={{ fontSize: 14.5, fontWeight: 800, color: '#111' }}>{edu.degree}</span>
+                                        {edu.field && <span style={{ fontSize: 14.5, fontWeight: 500, color: '#333' }}> – {edu.field}</span>}
+                                        {edu.institution && <div style={{ fontSize: 14, color: '#444', marginTop: 2 }}>{edu.institution}</div>}
+                                        {edu.grade && <div style={{ fontSize: 13, color: '#555', marginTop: 2 }}>GPA: {edu.grade}</div>}
                                     </div>
+                                    {dateStr && <span style={{ fontSize: 13.5, color: '#444', whiteSpace: 'nowrap', flexShrink: 0 }}>{dateStr}</span>}
                                 </div>
-                            );
-                        })}
-                    </div>
-                );
+                            </div>
+                        );
+                    })
+                ];
             }
             if (key === 'skills' && (skills.length > 0 || skillGroups)) {
-                return <div key="skills" style={{ marginBottom: mar }}><CleanSecHeader label={L.skills} iconKey='Skills' />{renderSkills()}</div>;
+                return [
+                    <div key="skills-hdr"><CleanSecHeader label={L.skills} /></div>,
+                    <div key="skills-content" style={{ marginBottom: mar }}>{renderSkills()}</div>
+                ];
             }
             if (key === 'languages' && langs.length > 0) {
-                return (
-                    <div key="languages"  style={{ marginBottom: mar }}>
-                        <CleanSecHeader label={L.languages} iconKey='Languages' />
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px 8px' }}>
-                            {langs.map((l, i) => (
-                                <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                                    <span style={{ fontSize: 12, fontWeight: 600, color: '#111' }}>{l.language}</span>
-                                    <span style={{ fontSize: 11.5, color: '#6b7280' }}>{l.proficiency}</span>
-                                </div>
-                            ))}
-                        </div>
+                return [
+                    <div key="lang-hdr"><CleanSecHeader label={L.languages} /></div>,
+                    <div key="lang-content" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px 12px', marginBottom: mar }}>
+                        {langs.map((l, i) => (
+                            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                                <span style={{ fontSize: 14, fontWeight: 700, color: '#111' }}>{l.language}</span>
+                                <span style={{ fontSize: 13.5, color: '#444' }}>{l.proficiency}</span>
+                            </div>
+                        ))}
                     </div>
-                );
+                ];
             }
             if (key === 'interests' && (interests.length > 0 || hobbies)) {
-                return (
-                    <div key="interests" style={{ marginBottom: mar }}>
-                        <CleanSecHeader label={L.interests} iconKey='Interests' />
+                return [
+                    <div key="int-hdr"><CleanSecHeader label={L.interests} /></div>,
+                    <div key="int-content" style={{ marginBottom: mar }}>
                         {interests.length > 0
-                            ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px 16px' }}>
-                                {interests.map((it, i) => { const t = typeof it === 'string' ? it : it?.name || ''; return t ? <span key={i} style={{ fontSize: 12, color: '#374151' }}>• {t}</span> : null; })}
+                            ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 18px' }}>
+                                {interests.map((it, i) => { const t = typeof it === 'string' ? it : it?.name || ''; return t ? <span key={i} style={{ fontSize: 14, color: '#333' }}>• {t}</span> : null; })}
                             </div>
-                            : <p style={{ margin: 0, fontSize: 12, color: '#374151' }}>{hobbies}</p>}
+                            : <p style={{ margin: 0, fontSize: 14, color: '#333' }}>{hobbies}</p>}
                     </div>
-                );
+                ];
             }
             if (key === 'projects' && projects.length > 0) {
-                return (
-                    <div key="projects" style={{ marginBottom: mar }}>
-                        <CleanSecHeader label={L.projects} iconKey='Projects' />
-                        {projects.map((p, i) => (
-                            <div key={i} className="cv-breakable" style={{ marginBottom: 8 }}>
-                                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                                    <span style={{ fontSize: 12.5, fontWeight: 700, color: '#111' }}>{p.name}</span>
-                                    {(p.link || p.url) && <span style={{ fontSize: 10.5, color: '#6b7280' }}>{p.link || p.url}</span>}
-                                </div>
-                                {p.description && <div style={{ fontSize: 12, color: '#374151', marginTop: 3, lineHeight: '1.7' }}>{parseRichText(p.description, hlWords)}</div>}
+                return [
+                    <div key="proj-hdr"><CleanSecHeader label={L.projects} /></div>,
+                    ...projects.map((p, i) => (
+                        <div key={`proj-${i}`} className="cv-breakable" style={{ marginBottom: i === projects.length - 1 ? mar : 12 }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                                <span style={{ fontSize: 14.5, fontWeight: 800, color: '#111' }}>{p.name}</span>
+                                {(p.link || p.url) && <span style={{ fontSize: 13, color: '#555' }}>{p.link || p.url}</span>}
                             </div>
-                        ))}
-                    </div>
-                );
+                            {p.description && <div style={{ fontSize: 14, color: '#222', marginTop: 4, lineHeight: '1.8' }}>{parseRichText(p.description, hlWords)}</div>}
+                        </div>
+                    ))
+                ];
             }
             if (key === 'certifications' && certs.length > 0) {
-                return (
-                    <div key="certifications" style={{ marginBottom: mar }}>
-                        <CleanSecHeader label={L.certifications} iconKey='Certifications' />
-                        {certs.map((c, i) => (
-                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 5, gap: 8 }}>
-                                <div>
-                                    <span style={{ fontSize: 12, fontWeight: 600, color: '#111' }}>{c.name}</span>
-                                    {c.issuer && <span style={{ fontSize: 12, color: '#6b7280' }}> — {c.issuer}</span>}
-                                </div>
-                                <span style={{ fontSize: 11.5, color: '#6b7280', whiteSpace: 'nowrap', flexShrink: 0 }}>{c.issueDate || c.date || ''}</span>
+                return [
+                    <div key="cert-hdr"><CleanSecHeader label={L.certifications} /></div>,
+                    ...certs.map((c, i) => (
+                        <div key={`cert-${i}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: i === certs.length - 1 ? mar : 8, gap: 8 }}>
+                            <div>
+                                <span style={{ fontSize: 14, fontWeight: 700, color: '#111' }}>{c.name}</span>
+                                {c.issuer && <span style={{ fontSize: 14, color: '#444' }}> — {c.issuer}</span>}
                             </div>
-                        ))}
-                    </div>
-                );
+                            <span style={{ fontSize: 13.5, color: '#444', whiteSpace: 'nowrap', flexShrink: 0 }}>{c.issueDate || c.date || ''}</span>
+                        </div>
+                    ))
+                ];
             }
             if (key === 'custom') {
                 const vis = customSections.filter(cs => cs.title && (cs.content || (Array.isArray(cs.items) && cs.items.length > 0)));
-                if (!vis.length) return null;
-                return (
-                    <React.Fragment key="custom">
-                        {vis.map((cs, i) => {
-                            const dc = cs.content || (Array.isArray(cs.items) ? cs.items.map(it => `• ${it}`).join('\n') : '');
-                            return (
-                                <div key={i} style={{ marginBottom: mar }}>
-                                    <CleanSecHeader label={cs.title} />
-                                    <div style={{ fontSize: 12, color: '#374151', lineHeight: '1.7' }}>{parseRichText(dc, hlWords)}</div>
-                                </div>
-                            );
-                        })}
-                    </React.Fragment>
-                );
+                if (!vis.length) return [];
+                return vis.flatMap((cs, i) => {
+                    const dc = cs.content || (Array.isArray(cs.items) ? cs.items.map(it => `• ${it}`).join('\n') : '');
+                    return [
+                        <div key={`cust-hdr-${i}`}><CleanSecHeader label={cs.title} /></div>,
+                        <div key={`cust-content-${i}`} style={{ fontSize: 14, color: '#222', lineHeight: '1.8', marginBottom: mar }}>
+                            {parseRichText(dc, hlWords)}
+                        </div>
+                    ];
+                });
             }
-            return null;
+            return [];
         };
 
-        return (
-            <div style={{ width: 794, minHeight: 1123, fontFamily: theme.fontFamily, fontSize: 12, lineHeight: '1.6', color: '#1a1a1a', background: 'white', padding: `${pageMargin + 8}px ${pageMargin + 12}px ${pageMargin}px` }}>
-                {/* Header — name, job title, contact */}
-                <div style={{ marginBottom: 20 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div style={{ flex: 1, paddingRight: 24, paddingTop: 6 }}>
-                            <h1 style={{ fontSize: 34, fontWeight: 800, margin: '0 0 4px', letterSpacing: '-0.01em', color: '#111', lineHeight: 1.2 }}>{name || 'Your Name'}</h1>
-                            {jobTitle && <p style={{ fontSize: 15, color: '#111', fontWeight: 500, margin: '0 0 16px' }}>{jobTitle}</p>}
-                            
-                            <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', gap: '8px 24px', fontSize: 11.5, color: '#111', fontWeight: 400, maxWidth: '80%' }}>
-                                {email && <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Icons.Email /> {email}</span>}
-                                {phone && <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Icons.Phone /> {phone}</span>}
-                                {location && <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Icons.Location /> {location}</span>}
-                                {linkedin && <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Icons.LinkedIn /> {linkedin}</span>}
-                                {website && <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Icons.Website /> {website}</span>}
-                            </div>
+        const topHeaderBlock = (
+            <div key="top-header" style={{ marginBottom: 24 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1, paddingRight: 24, paddingTop: 6 }}>
+                        <h1 style={{ fontSize: 40, fontWeight: 900, margin: '0 0 6px', letterSpacing: '-0.01em', color: '#111', lineHeight: 1.15 }}>{name || 'Your Name'}</h1>
+                        {jobTitle && <p style={{ fontSize: 18, color: '#222', fontWeight: 600, fontStyle: 'italic', margin: '0 0 20px' }}>{jobTitle}</p>}
+                        
+                        <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', gap: '10px 28px', fontSize: 13.5, color: '#111', fontWeight: 500, maxWidth: '90%' }}>
+                            {email && <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Icons.Email /> {email}</span>}
+                            {phone && <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Icons.Phone /> {phone}</span>}
+                            {location && <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Icons.Location /> {location}</span>}
+                            {linkedin && <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Icons.LinkedIn /> {linkedin}</span>}
+                            {website && <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Icons.Website /> {website}</span>}
                         </div>
-                        {photo && <img src={photo} alt="Profile" style={{ width: photoSizePx * 1.3, height: photoSizePx * 1.3, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: '1px solid transparent' }} />}
                     </div>
+                    {photo && <img src={photo} alt="Profile" style={{ width: photoSizePx * 1.5, height: photoSizePx * 1.5, borderRadius: '8px', objectFit: 'cover', flexShrink: 0, border: '1px solid transparent' }} />}
                 </div>
-                {/* All sections use CleanSecHeader (no colored bar under profile) */}
-                {sectionOrder.map(key => renderCleanSection(key))}
             </div>
         );
+
+        const allBlocks = [topHeaderBlock, ...sectionOrder.flatMap(key => renderCleanSectionBlocks(key))].filter(Boolean);
+
+        return <PagedLayout blocks={allBlocks} pageMargin={pageMargin} theme={theme} />;
     }
 
     /* ═══════════════════════════════════════════════════════
