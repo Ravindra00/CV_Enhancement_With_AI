@@ -82,6 +82,15 @@ class SignupRequest(UserCreate):
     pass
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=6)
+
+
+class UserProfileUpdateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+
+
 class SignupResponse(BaseModel):
     user: UserResponse
     access_token: Optional[str] = None

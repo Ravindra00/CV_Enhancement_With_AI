@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.config import ACCESS_TOKEN_EXPIRE_MINUTES
 from app.database import get_db
+from app.dependencies import get_current_user
 from app.models import User, OTP
-from app.schemas import LoginRequest, LoginResponse, SignupRequest, SignupResponse, UserResponse, VerifyPinRequest
+from app.schemas import LoginRequest, LoginResponse, SignupRequest, SignupResponse, UserResponse, VerifyPinRequest, ChangePasswordRequest, UserProfileUpdateRequest
 from app.security import get_password_hash, verify_password, create_access_token
 
 logger = logging.getLogger(__name__)
@@ -152,4 +153,38 @@ def verify_pin(data: VerifyPinRequest, db: Session = Depends(get_db)):
 def logout():
     """JWT is stateless — this endpoint exists for client-side cleanup."""
     return {"message": "Logged out successfully"}
+
+
+@router.post("/change-password")
+def change_password(
+    data: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Change user password."""
+    # Verify current password
+    if not verify_password(data.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect current password"
+        )
+    
+    # Hash new password and update user
+    current_user.hashed_password = get_password_hash(data.new_password)
+    db.commit()
+    
+    return {"message": "Password updated successfully"}
+
+@router.put("/update-profile", response_model=UserResponse)
+def update_profile(
+    data: UserProfileUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update user profile information."""
+    current_user.name = data.name
+    db.commit()
+    db.refresh(current_user)
+    return UserResponse.from_orm(current_user)
+
 

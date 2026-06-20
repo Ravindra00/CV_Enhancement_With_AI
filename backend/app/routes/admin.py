@@ -59,6 +59,7 @@ class UserAdminResponse(BaseModel):
     is_active: bool
     is_superuser: bool
     ai_access: bool
+    is_verified: bool
     cv_count: int
     last_login: Optional[datetime] = None
     failed_login_attempts: int = 0
@@ -73,6 +74,7 @@ class UserUpdateRequest(BaseModel):
     is_active: Optional[bool] = None
     is_superuser: Optional[bool] = None
     ai_access: Optional[bool] = None
+    is_verified: Optional[bool] = None
 
 
 class PaginatedUsersResponse(BaseModel):
@@ -100,6 +102,7 @@ def _build_user_admin_response(user: User, cv_count: int) -> UserAdminResponse:
         is_active=user.is_active if user.is_active is not None else True,
         is_superuser=user.is_superuser if user.is_superuser is not None else False,
         ai_access=user.ai_access if user.ai_access is not None else True,
+        is_verified=user.is_verified if user.is_verified is not None else False,
         cv_count=cv_count,
         last_login=user.last_login,
         failed_login_attempts=user.failed_login_attempts or 0,
@@ -229,6 +232,7 @@ def update_user(
         "is_active": user.is_active,
         "is_superuser": user.is_superuser,
         "ai_access": user.ai_access,
+        "is_verified": user.is_verified,
     }
     new_vals: dict = {}
 
@@ -241,6 +245,9 @@ def update_user(
     if body.ai_access is not None:
         user.ai_access = body.ai_access
         new_vals["ai_access"] = body.ai_access
+    if body.is_verified is not None:
+        user.is_verified = body.is_verified
+        new_vals["is_verified"] = body.is_verified
 
     user.updated_at = datetime.utcnow()
 

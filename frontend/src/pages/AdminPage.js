@@ -274,7 +274,7 @@ const UsersTab = ({ currentUser, show }) => {
                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                                 <thead>
                                     <tr style={{ background: 'rgba(255,255,255,0.03)' }}>
-                                        {['Name', 'Email', 'CVs', 'Last Login', 'Status', 'AI', 'Admin', 'Actions'].map(h => (
+                                        {['Name', 'Email', 'CVs', 'Last Login', 'Status', 'Verified', 'AI', 'Admin', 'Actions'].map(h => (
                                             <th key={h} style={{ padding: '10px 14px', textAlign: 'left', color: '#6b7280', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{h}</th>
                                         ))}
                                     </tr>
@@ -307,6 +307,9 @@ const UsersTab = ({ currentUser, show }) => {
                                             <td style={{ padding: '11px 14px', color: '#6b7280', fontSize: 11 }}>{fmtDateShort(u.last_login)}</td>
                                             <td style={{ padding: '11px 14px' }} onClick={e => e.stopPropagation()}>
                                                 <Toggle checked={u.is_active} disabled={u.id === currentUser.id} onChange={v => toggle(u.id, 'is_active', v)} color="#10b981" />
+                                            </td>
+                                            <td style={{ padding: '11px 14px' }} onClick={e => e.stopPropagation()}>
+                                                <Toggle checked={u.is_verified} onChange={v => toggle(u.id, 'is_verified', v)} color="#0ea5e9" />
                                             </td>
                                             <td style={{ padding: '11px 14px' }} onClick={e => e.stopPropagation()}>
                                                 <Toggle checked={u.ai_access} onChange={v => toggle(u.id, 'ai_access', v)} color="#f59e0b" />

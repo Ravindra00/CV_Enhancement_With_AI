@@ -79,13 +79,23 @@ const Navbar = ({ isDark, onToggleDark }) => {
             </button>
 
             {user && (
-              <div className="hidden sm:flex items-center gap-2">
+              <div className="hidden sm:flex items-center gap-2 mr-2">
                 <div className="w-7 h-7 rounded-full bg-primary-100 ring-2 ring-primary-200 flex items-center justify-center">
                   <span className="text-primary-700 font-semibold text-xs">{user.name?.charAt(0).toUpperCase()}</span>
                 </div>
                 <span className="text-sm font-medium app-text-primary">{user.name}</span>
               </div>
             )}
+
+            <button
+              onClick={() => navigate('/profile')}
+              className="text-sm font-medium app-text-secondary px-3 py-1.5 rounded-lg transition"
+              style={{ border: '1px solid var(--app-border)' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--app-text-primary)'; e.currentTarget.style.color = 'var(--app-text-primary)'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--app-border)'; e.currentTarget.style.color = 'var(--app-text-secondary)'; }}
+            >
+              Profile
+            </button>
 
             <button
               onClick={() => { logout(); navigate('/login'); }}
@@ -99,6 +109,7 @@ const Navbar = ({ isDark, onToggleDark }) => {
           </div>
         </div>
       </div>
+
     </nav>
   );
 };

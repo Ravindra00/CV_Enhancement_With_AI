@@ -18,6 +18,7 @@ import CoverLetterEditorPage from './pages/CoverLetterEditorPage';
 import CoverLetterGeneratorPage from './pages/CoverLetterGeneratorPage';
 import JobTrackerPage from './pages/JobTrackerPage';
 import AdminPage from './pages/AdminPage';
+import UserProfilePage from './pages/UserProfilePage';
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -63,6 +64,9 @@ function App() {
 
           {/* Admin */}
           <Route path="/admin" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />
+
+          {/* Profile */}
+          <Route path="/profile" element={<ProtectedRoute><UserProfilePage /></ProtectedRoute>} />
 
           {/* ==================== DEFAULT ROUTES ==================== */}
           <Route path="/" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />} />
