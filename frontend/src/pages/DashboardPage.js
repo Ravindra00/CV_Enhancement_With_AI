@@ -4,6 +4,7 @@ import { useCVStore } from '../store/cvStore';
 import { cvAPI } from '../services/api';
 import CVUploadModal from '../components/CVUploadModal';
 import CVPreview from '../components/CVPreview';
+import { useTranslation } from 'react-i18next';
 
 /**
  * ScaledCVThumbnail — renders the full CVPreview at 40% scale inside a fixed
@@ -88,6 +89,7 @@ const DashboardPage = () => {
   const [toast, setToast] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null); // { id, title }
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   useEffect(() => { fetchCVs(); }, []);
 
@@ -124,6 +126,17 @@ const DashboardPage = () => {
       navigate(`/cv-editor/${r.data.id}`);
     } catch (err) { showToast(err.response?.data?.detail || 'Failed to create CV', 'error'); }
     finally { setCreating(false); }
+  };
+
+  const handleDuplicate = async (id, e) => {
+    if (e) e.stopPropagation();
+    try {
+      await cvAPI.duplicate(id);
+      showToast('CV duplicated successfully!');
+      fetchCVs();
+    } catch (err) {
+      showToast(err.response?.data?.detail || 'Failed to duplicate CV', 'error');
+    }
   };
 
   const handleFileUpload = async (file) => {
@@ -173,8 +186,8 @@ const DashboardPage = () => {
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">My Resumes</h1>
-            <p className="text-gray-500 text-sm mt-0.5">Create and manage your professional CVs</p>
+            <h1 className="text-2xl font-bold text-gray-900">{t('My Resumes')}</h1>
+            <p className="text-gray-500 text-sm mt-0.5">{t('Create and manage your professional CVs')}</p>
           </div>
           <div className="flex gap-2">
             <button
@@ -189,7 +202,7 @@ const DashboardPage = () => {
               className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-primary hover:bg-primary-700 rounded-lg transition shadow-sm"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-              New Resume
+              {t('New Resume')}
             </button>
           </div>
         </div>
@@ -245,13 +258,22 @@ const DashboardPage = () => {
                         className="bg-blue-600 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-sm hover:bg-blue-700 transition min-w-[72px]"
                       >✉ Letter</button>
                     </div>
-                    <button
-                      onClick={e => { e.stopPropagation(); handleDelete(cv.id, e); }}
-                      className="bg-red-600 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-sm hover:bg-red-700 transition w-full max-w-[220px] flex items-center justify-center gap-1.5"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                      Delete
-                    </button>
+                    <div className="flex gap-2 w-full max-w-[220px]">
+                      <button
+                        onClick={e => { e.stopPropagation(); handleDuplicate(cv.id, e); }}
+                        className="bg-gray-700 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-sm hover:bg-gray-800 transition flex-1 flex items-center justify-center gap-1.5"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
+                        Duplicate
+                      </button>
+                      <button
+                        onClick={e => { e.stopPropagation(); handleDelete(cv.id, e); }}
+                        className="bg-red-600 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow-sm hover:bg-red-700 transition flex-1 flex items-center justify-center gap-1.5"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 </div>
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { cvAPI, customizeAPI, jobApplicationAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import CVPreview from '../components/CVPreview';
@@ -125,6 +126,7 @@ const CVCustomizePage = () => {
   const photoRef = useRef();
   const interestRef = useRef();
   const { user } = useAuthStore();
+  const { t } = useTranslation();
   const canUseAI = user?.ai_access === true || user?.is_superuser === true;
 
   // ── core state ────────────────────────────────────────────────────────────
@@ -590,7 +592,7 @@ const CVCustomizePage = () => {
     const isWeak = weakSectionSet.has(key.toLowerCase());
 
     if (key === 'summary') return (
-      <Accordion key="summary" icon="📝" label="Profile Summary" warn={isWeak}>
+      <Accordion key="summary" icon="📝" label={t("Profile Summary")} warn={isWeak}>
         <div className="mt-2">
           {/* AI Summary Writer */}
           {canUseAI ? (
@@ -621,7 +623,7 @@ const CVCustomizePage = () => {
     );
 
     if (key === 'experience') return (
-      <Accordion key="experience" icon="💼" label="Experience" badge={(cvData.experiences || []).length} warn={isWeak}>
+      <Accordion key="experience" icon="💼" label={t("Experience")} badge={(cvData.experiences || []).length} warn={isWeak}>
         <div className="space-y-3 mt-2">
           {(cvData.experiences || []).map((exp, i) => (
             <div key={i} className="p-3 bg-gray-50 dark:bg-slate-700 rounded-xl border border-gray-200 dark:border-slate-600 space-y-2 relative">
@@ -691,7 +693,7 @@ const CVCustomizePage = () => {
     );
 
     if (key === 'education') return (
-      <Accordion key="education" icon="🎓" label="Education" badge={(cvData.educations || []).length} warn={isWeak}>
+      <Accordion key="education" icon="🎓" label={t("Education")} badge={(cvData.educations || []).length} warn={isWeak}>
         <div className="space-y-3 mt-2">
           {(cvData.educations || []).map((edu, i) => (
             <div key={i} className="p-3 bg-gray-50 dark:bg-slate-700 rounded-xl border border-gray-200 dark:border-slate-600 space-y-2 relative">
@@ -712,13 +714,13 @@ const CVCustomizePage = () => {
     );
 
     if (key === 'skills') return (
-      <Accordion key="skills" icon="⚡" label="Skills" badge={(cvData.skills || []).length} warn={isWeak}>
+      <Accordion key="skills" icon="⚡" label={t("Skills")} badge={(cvData.skills || []).length} warn={isWeak}>
         <div className="mt-2"><SkillsInput skills={cvData.skills || []} onChange={v => setSection('skills', v)} onSuggestSkills={handleSuggestSkills} suggestedSkills={suggestedSkills} onAddSuggested={handleAddSuggestedSkill} suggestingSkills={suggestingSkills} /></div>
       </Accordion>
     );
 
     if (key === 'languages') return (
-      <Accordion key="languages" icon="🌐" label="Languages" badge={(cvData.languages || []).length}>
+      <Accordion key="languages" icon="🌐" label={t("Languages")} badge={(cvData.languages || []).length}>
         <div className="space-y-2 mt-2">
           {(cvData.languages || []).map((lang, i) => (
             <div key={i} className="flex gap-2 items-center">
@@ -735,7 +737,7 @@ const CVCustomizePage = () => {
     );
 
     if (key === 'projects') return (
-      <Accordion key="projects" icon="🚀" label="Projects" badge={(cvData.projects || []).length}>
+      <Accordion key="projects" icon="🚀" label={t("Projects")} badge={(cvData.projects || []).length}>
         <div className="space-y-3 mt-2">
           {(cvData.projects || []).map((proj, i) => (
             <div key={i} className="p-3 bg-gray-50 dark:bg-slate-700 rounded-xl border border-gray-200 dark:border-slate-600 space-y-2 relative">
@@ -754,7 +756,7 @@ const CVCustomizePage = () => {
     );
 
     if (key === 'certifications') return (
-      <Accordion key="certifications" icon="🏅" label="Certifications" badge={(cvData.certifications || []).length}>
+      <Accordion key="certifications" icon="🏅" label={t("Certifications")} badge={(cvData.certifications || []).length}>
         <div className="space-y-2 mt-2">
           {(cvData.certifications || []).map((cert, i) => (
             <div key={i} className="p-3 bg-gray-50 dark:bg-slate-700 rounded-xl border border-gray-200 dark:border-slate-600 grid grid-cols-3 gap-2 relative">

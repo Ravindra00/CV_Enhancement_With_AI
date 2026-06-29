@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
+import { useTranslation } from 'react-i18next';
 
 /**
  * Navbar
@@ -12,11 +13,12 @@ const Navbar = ({ isDark, onToggleDark }) => {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
+  const { t, i18n } = useTranslation();
 
   const navLinks = [
-    { to: '/dashboard', label: 'My CVs', icon: '📄' },
-    { to: '/cover-letters', label: 'Cover Letters', icon: '✉️' },
-    { to: '/jobs', label: 'Job Tracker', icon: '🎯' },
+    { to: '/dashboard', label: t('My Resumes') || 'My CVs', icon: '📄' },
+    { to: '/cover-letters', label: t('Cover Letters'), icon: '✉️' },
+    { to: '/jobs', label: t('Job Tracker'), icon: '🎯' },
     ...(user?.is_superuser ? [{ to: '/admin', label: 'Admin', icon: '⚙️' }] : []),
   ];
 
@@ -78,6 +80,17 @@ const Navbar = ({ isDark, onToggleDark }) => {
               )}
             </button>
 
+            {/* Language Switcher */}
+            <select
+              value={i18n.language}
+              onChange={(e) => i18n.changeLanguage(e.target.value)}
+              className="text-sm font-medium app-text-secondary px-2 py-1 rounded-lg transition"
+              style={{ background: 'var(--app-sidebar)', border: '1px solid var(--app-border)' }}
+            >
+              <option value="en">EN</option>
+              <option value="de">DE</option>
+            </select>
+
             {user && (
               <div className="hidden sm:flex items-center gap-2 mr-2">
                 <div className="w-7 h-7 rounded-full bg-primary-100 ring-2 ring-primary-200 flex items-center justify-center">
@@ -104,7 +117,7 @@ const Navbar = ({ isDark, onToggleDark }) => {
               onMouseEnter={e => { e.currentTarget.style.borderColor = '#e11d48'; e.currentTarget.style.color = '#e11d48'; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--app-border)'; e.currentTarget.style.color = 'var(--app-text-secondary)'; }}
             >
-              Logout
+              {t('Logout')}
             </button>
           </div>
         </div>

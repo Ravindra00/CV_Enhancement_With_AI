@@ -324,6 +324,48 @@ def create_cv(
     return _cv_to_response(new_cv)
 
 
+@router.post("/{cv_id}/duplicate", response_model=CVResponse)
+def duplicate_cv(
+    cv_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Duplicate an existing CV."""
+    original = db.query(CV).filter(CV.id == cv_id, CV.user_id == current_user.id).first()
+    if not original:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CV not found")
+
+    new_title = f"{original.title or 'Untitled'} (Copy)"
+    new_cv = CV(
+        user_id=current_user.id,
+        title=new_title,
+        full_name=original.full_name,
+        email=original.email,
+        phone=original.phone,
+        location=original.location,
+        linkedin_url=original.linkedin_url,
+        profile_summary=original.profile_summary,
+        personal_info=original.personal_info,
+        educations=original.educations,
+        experiences=original.experiences,
+        projects=original.projects,
+        skills=original.skills,
+        languages=original.languages,
+        certifications=original.certifications,
+        interests=original.interests,
+        custom_sections=original.custom_sections,
+        theme=original.theme,
+        file_path=original.file_path,
+        photo_path=original.photo_path,
+        original_text=original.original_text,
+        current_version=1,
+    )
+    db.add(new_cv)
+    db.commit()
+    db.refresh(new_cv)
+    return _cv_to_response(new_cv)
+
+
 @router.put("/{cv_id}", response_model=CVResponse)
 def update_cv(
     cv_id: int,

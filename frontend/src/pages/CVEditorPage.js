@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import CVPreview from '../components/CVPreview';
 import ThemePanel from '../components/ThemePanel';
 import { cvAPI } from '../services/api';
@@ -127,6 +128,7 @@ const CVEditorPage = () => {
   const id = params.id || params.cvId;   // support /cv/:id AND /cv-editor/:cvId
   const navigate = useNavigate();
   const { user } = useAuthStore();
+  const { t } = useTranslation();
   const canUseAI = user?.ai_access === true || user?.is_superuser === true;
   const [cvData, setCvData] = useState(DEFAULT_CV);
   const [title, setTitle] = useState('My CV');
@@ -238,7 +240,7 @@ const CVEditorPage = () => {
           : DEFAULT_CV.theme,
       });
       // Mark initial load complete after a short delay to prevent auto-save trigger
-      setTimeout(() => setIsInitialLoad(false), 500);
+      setTimeout(() => setIsInitialLoad(false), 2000);
     }).catch(err => {
       console.error('Failed to load CV:', err);
       alert(`Failed to load CV: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
@@ -394,7 +396,7 @@ const CVEditorPage = () => {
 
   const SectionHeader = ({ k, label }) => (
     <button className={SECTION_BTN} onClick={() => toggle(k)}>
-      <span className="font-semibold text-sm">{label}</span>
+      <span className="font-semibold text-sm">{t(label)}</span>
       <svg className={`w-4 h-4 text-gray-400 dark:text-slate-500 transition-transform flex-shrink-0 ${open[k] ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
     </button>
   );

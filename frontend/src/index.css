@@ -98,7 +98,8 @@ html.dark {
   .app-card {
     background-color: var(--app-panel);
     border: 1px solid var(--app-border);
-    border-radius: 0.75rem;
+    border-radius: 1rem;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.03);
   }
 }
 
@@ -110,7 +111,7 @@ html.dark {
 }
 
 html {
-  font-size: 17.5px;
+  font-size: 18.5px;
   scroll-behavior: smooth;
 }
 
@@ -123,12 +124,13 @@ html.dark {
 }
 
 body {
-  font-family: 'Outfit', 'Inter', system-ui, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background: var(--app-bg);
   color: var(--app-text-primary);
   transition: background-color 0.2s ease, color 0.2s ease;
+  letter-spacing: -0.01em;
 }
 
 /* ── Smooth theme transitions on all major surfaces ── */
@@ -179,7 +181,7 @@ html.dark .skill-chip {
 /* ── CV Paper shadow (always white — not inverted in dark mode) ── */
 .cv-paper {
   background: white !important;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0,0,0,0.05);
 }
 
 /* ── Dark-mode Tailwind utility helpers ── */

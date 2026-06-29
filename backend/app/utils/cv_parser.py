@@ -20,22 +20,22 @@ SECTION_KEYWORDS = {
     'summary': [
         'berufliches profil', 'berufsprofil', 'profil', 'profile', 'summary',
         'about me', 'über mich', 'kurzprofil', 'zusammenfassung',
-        'executive summary', 'career objective', 'objective',
+        'executive summary', 'career objective', 'objective', 'personal statement'
     ],
     'experience': [
         'berufserfahrung', 'beruflicher werdegang', 'arbeitserfahrung',
         'professional experience', 'work experience', 'employment history',
-        'experience', 'career history', 'positions held',
+        'experience', 'career history', 'positions held', 'work history', 'employment'
     ],
     'education': [
         'akademische ausbildung', 'ausbildung', 'bildung', 'studium',
         'akademischer werdegang', 'education', 'academic background',
-        'qualifications', 'formation',
+        'qualifications', 'formation', 'academic history', 'scholastic', 'educational background'
     ],
     'skills': [
         'kenntnisse', 'fähigkeiten', 'kompetenzen', 'schlüsselkompetenzen',
         'skills', 'technical skills', 'core competencies', 'expertise',
-        'kenntnisse und kompetenzen', 'hard skills',
+        'kenntnisse und kompetenzen', 'hard skills', 'competencies', 'technologies'
     ],
     'soft_skills': [
         'soft skills', 'soziale kompetenzen', 'persönliche kompetenzen',
@@ -45,13 +45,13 @@ SECTION_KEYWORDS = {
     'certifications': [
         'weiterbildung und zertifikate', 'zertifikate', 'zertifizierungen',
         'weiterbildung', 'certifications', 'certificates', 'credentials',
-        'further education', 'further training',
+        'further education', 'further training', 'licenses'
     ],
     'languages': [
         'sprachkenntnisse', 'sprachen', 'fremdsprachen',
         'languages', 'language skills',
     ],
-    'projects': ['projekte', 'projects', 'portfolio'],
+    'projects': ['projekte', 'projects', 'portfolio', 'personal projects'],
     'interests': [
         'interessen', 'hobbys', 'freizeit', 'interests', 'hobbies',
         'hobbies and interests', 'freizeitaktivitäten',

@@ -244,10 +244,10 @@ const CoverLetterPanel = ({ isOpen, onClose, letter: initialLetter, onRegenerate
             <button
               onClick={handleSaveLocally}
               disabled={!letter || savedLocally}
-              className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition disabled:opacity-50 ${
+              className={`flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg shadow-sm transition disabled:opacity-50 ${
                 savedLocally
                   ? 'bg-green-600 text-white'
-                  : 'app-bg-secondary app-text-primary hover:opacity-80 app-border border'
+                  : 'bg-emerald-500 hover:bg-emerald-600 text-white'
               }`}
               title="Save to local browser storage"
             >

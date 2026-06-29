@@ -46,6 +46,7 @@ export const cvAPI = {
   getAll: () => apiClient.get('/cvs'),
   getOne: (id) => apiClient.get(`/cvs/${id}`),
   create: (data) => apiClient.post('/cvs', data),
+  duplicate: (id) => apiClient.post(`/cvs/${id}/duplicate`),
   update: (id, data) => apiClient.put(`/cvs/${id}`, data),
   delete: (id) => apiClient.delete(`/cvs/${id}`),
 

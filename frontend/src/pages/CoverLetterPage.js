@@ -18,6 +18,8 @@ const CoverLetterPage = () => {
     const [linkedCv, setLinkedCv] = useState('');
     const [creating, setCreating] = useState(false);
     const [toast, setToast] = useState(null);
+    const [editingLocal, setEditingLocal] = useState(null);
+    const [localEditText, setLocalEditText] = useState('');
 
     // Load backend + localStorage entries
     useEffect(() => {
@@ -54,10 +56,22 @@ const CoverLetterPage = () => {
     };
 
     const delLocal = (id) => {
+        if (!window.confirm('Delete this saved letter?')) return;
         const updated = localLetters.filter(l => l.id !== id);
         setLocalLetters(updated);
         localStorage.setItem(LS_KEY, JSON.stringify(updated));
         showToast('Deleted');
+    };
+
+    const saveLocalEdit = () => {
+        if (!editingLocal) return;
+        const updated = localLetters.map(l => 
+            l.id === editingLocal.id ? { ...l, body: localEditText } : l
+        );
+        setLocalLetters(updated);
+        localStorage.setItem(LS_KEY, JSON.stringify(updated));
+        setEditingLocal(null);
+        showToast('Saved successfully');
     };
 
     const exportLocalPDF = (entry) => {
@@ -147,6 +161,24 @@ const CoverLetterPage = () => {
                     </div>
                 )}
 
+                {/* Edit Local Letter Modal */}
+                {editingLocal && (
+                    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+                        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl p-6 h-[80vh] flex flex-col">
+                            <h2 className="text-lg font-bold text-gray-900 dark:text-slate-100 mb-4">Edit Local Cover Letter</h2>
+                            <textarea
+                                value={localEditText}
+                                onChange={e => setLocalEditText(e.target.value)}
+                                className="flex-1 w-full border border-gray-200 dark:border-slate-600 rounded-lg p-4 text-sm focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-slate-900 text-gray-900 dark:text-slate-100 resize-none font-mono mb-4"
+                            />
+                            <div className="flex gap-2 justify-end">
+                                <button onClick={() => setEditingLocal(null)} className="px-4 py-2 text-sm text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition">Cancel</button>
+                                <button onClick={saveLocalEdit} className="px-5 py-2 bg-primary text-white rounded-lg text-sm font-semibold hover:bg-primary-700 transition">Save</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* ── Locally Saved section ──────────────────────────────────── */}
                 {localLetters.length > 0 && (
                     <div className="mb-10">
@@ -161,6 +193,14 @@ const CoverLetterPage = () => {
                                                 className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-500 dark:text-slate-400 transition text-xs font-medium"
                                                 title="Export PDF">
                                                 📄 PDF
+                                            </button>
+                                            <button onClick={() => {
+                                                setEditingLocal(entry);
+                                                setLocalEditText(entry.body || '');
+                                            }}
+                                                className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-700 text-gray-500 dark:text-slate-400 transition text-xs font-medium"
+                                                title="Edit">
+                                                ✏️ Edit
                                             </button>
                                             <button onClick={() => delLocal(entry.id)}
                                                 className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950 text-gray-500 dark:text-slate-400 hover:text-red-500 transition"

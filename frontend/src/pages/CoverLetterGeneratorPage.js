@@ -113,6 +113,12 @@ const CoverLetterGeneratorPage = () => {
     () => sessionStorage.getItem(SESS_LANG_KEY) || 'auto'
   );
 
+  // New sender/recipient fields
+  const [senderName, setSenderName] = useState('');
+  const [senderContact, setSenderContact] = useState('');
+  const [recipientName, setRecipientName] = useState('');
+  const [recipientCompany, setRecipientCompany] = useState('');
+
   // Persist language + JD to sessionStorage
   useEffect(() => { sessionStorage.setItem(SESS_LANG_KEY, language); }, [language]);
   useEffect(() => { sessionStorage.setItem(SESS_JD_KEY, jobDescription); }, [jobDescription]);
@@ -160,7 +166,17 @@ const CoverLetterGeneratorPage = () => {
       setGenerating(true);
       setGeneratedLetter('');
       setGeneratedLetterId(null);
-      const res = await coverLetterAPI.generateWithAI(cvId, jobDescription, coverLetterTitle, language);
+      
+      let enhancedJD = jobDescription;
+      if (senderName || senderContact || recipientName || recipientCompany) {
+        enhancedJD += "\n\nAdditional details for the letter:\n";
+        if (senderName) enhancedJD += `- Sender Name: ${senderName}\n`;
+        if (senderContact) enhancedJD += `- Sender Contact: ${senderContact}\n`;
+        if (recipientName) enhancedJD += `- Recipient Name: ${recipientName}\n`;
+        if (recipientCompany) enhancedJD += `- Recipient Company: ${recipientCompany}\n`;
+      }
+
+      const res = await coverLetterAPI.generateWithAI(cvId, enhancedJD, coverLetterTitle, language);
       const letterText = res.data.content?.text || res.data.content;
       if (!letterText) { showToast('Error: No content in response', 'error'); return; }
       setGeneratedLetter(letterText);
@@ -272,6 +288,53 @@ const CoverLetterGeneratorPage = () => {
               </div>
             </div>
 
+            {/* Sender / Recipient Information */}
+            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-slate-700">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-4">Letter Details (Optional)</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-slate-300 mb-1">Sender Name</label>
+                  <input
+                    type="text"
+                    value={senderName}
+                    onChange={e => setSenderName(e.target.value)}
+                    placeholder="Your Name"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-slate-700 text-gray-900 dark:text-slate-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-slate-300 mb-1">Sender Contact</label>
+                  <input
+                    type="text"
+                    value={senderContact}
+                    onChange={e => setSenderContact(e.target.value)}
+                    placeholder="Phone / Email"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-slate-700 text-gray-900 dark:text-slate-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-slate-300 mb-1">Recipient Name</label>
+                  <input
+                    type="text"
+                    value={recipientName}
+                    onChange={e => setRecipientName(e.target.value)}
+                    placeholder="Hiring Manager Name"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-slate-700 text-gray-900 dark:text-slate-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-slate-300 mb-1">Recipient Company</label>
+                  <input
+                    type="text"
+                    value={recipientCompany}
+                    onChange={e => setRecipientCompany(e.target.value)}
+                    placeholder="Company Name"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-slate-700 text-gray-900 dark:text-slate-100"
+                  />
+                </div>
+              </div>
+            </div>
+
             {/* Settings: title + language */}
             <div className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-slate-700 space-y-4">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">Settings</h2>
@@ -380,12 +443,21 @@ const CoverLetterGeneratorPage = () => {
                     ✓ View All Letters
                   </button>
 
-                  {/* Generate another */}
+                  {/* Regenerate */}
+                  <button
+                    onClick={generateAndSaveCoverLetter}
+                    disabled={generating}
+                    className="w-full py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg font-medium text-sm transition"
+                  >
+                    ↻ Regenerate
+                  </button>
+
+                  {/* Clear form */}
                   <button
                     onClick={resetForm}
                     className="w-full py-2 border border-gray-300 dark:border-slate-600 text-gray-700 dark:text-slate-300 rounded-lg font-medium text-sm hover:bg-gray-50 dark:hover:bg-slate-700 transition"
                   >
-                    ↻ Generate Another
+                    ✕ Clear Form
                   </button>
                 </div>
               </>
