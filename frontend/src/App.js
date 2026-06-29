@@ -17,6 +17,7 @@ import CoverLetterViewPage from './pages/CoverLetterViewPage';
 import CoverLetterEditorPage from './pages/CoverLetterEditorPage';
 import CoverLetterGeneratorPage from './pages/CoverLetterGeneratorPage';
 import JobTrackerPage from './pages/JobTrackerPage';
+import RecommendedJobsPage from './pages/RecommendedJobsPage';
 import AdminPage from './pages/AdminPage';
 import UserProfilePage from './pages/UserProfilePage';
 
@@ -61,6 +62,7 @@ function App() {
 
           {/* Job Tracker */}
           <Route path="/jobs" element={<ProtectedRoute><JobTrackerPage /></ProtectedRoute>} />
+          <Route path="/recommended-jobs" element={<ProtectedRoute><RecommendedJobsPage /></ProtectedRoute>} />
 
           {/* Admin */}
           <Route path="/admin" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />

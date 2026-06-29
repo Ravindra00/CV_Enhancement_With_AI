@@ -183,6 +183,8 @@ def update_profile(
 ):
     """Update user profile information."""
     current_user.name = data.name
+    if data.job_preferences is not None:
+        current_user.job_preferences = data.job_preferences
     db.commit()
     db.refresh(current_user)
     return UserResponse.from_orm(current_user)

@@ -4,6 +4,8 @@ from sqlalchemy import (
     String,
     Text,
     DateTime,
+    Date,
+    Numeric,
     Boolean,
     ForeignKey,
     Enum,
@@ -12,6 +14,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from datetime import datetime
+import uuid
 import enum
 
 from app.database import Base
@@ -53,6 +56,7 @@ class User(Base):
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    job_preferences = Column(JSON, nullable=True)
 
     cvs = relationship("CV", back_populates="user", cascade="all, delete-orphan")
     cover_letters = relationship("CoverLetter", back_populates="user", cascade="all, delete-orphan")
@@ -290,3 +294,53 @@ class SystemConfig(Base):
     value = Column(Text, nullable=False)
     description = Column(String(500), nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class AppSettings(Base):
+    __tablename__ = "app_settings"
+    key_name = Column(String(255), primary_key=True)
+    key_value = Column(Text, nullable=True)
+    description = Column(String(500), nullable=True)
+    is_secret = Column(Boolean, default=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class JobListing(Base):
+    __tablename__ = "job_listings"
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    external_id = Column(String(255), nullable=False)
+    source = Column(String(50), nullable=False)
+    title = Column(String(255), nullable=False)
+    company = Column(String(255), nullable=False)
+    location = Column(String(255))
+    url = Column(Text, nullable=False)
+    description = Column(Text)
+    salary_min = Column(Numeric(10, 2))
+    salary_max = Column(Numeric(10, 2))
+    currency = Column(String(10))
+    posted_at = Column(DateTime)
+    fetched_at = Column(DateTime, default=datetime.utcnow)
+    apply_count = Column(Integer, default=0)
+
+    __table_args__ = (
+        Index("uq_source_ext", "source", "external_id", unique=True),
+    )
+
+class UserJobRecommendation(Base):
+    __tablename__ = "user_job_recommendations"
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    job_id = Column(String(36), ForeignKey("job_listings.id"), nullable=False)
+    match_score = Column(Numeric(5, 2))
+    match_reasons = Column(JSON)
+    recommended_on = Column(Date, default=datetime.utcnow().date)
+    is_viewed = Column(Boolean, default=False)
+    is_saved = Column(Boolean, default=False)
+    is_applied = Column(Boolean, default=False)
+    is_dismissed = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", backref="job_recommendations")
+    job = relationship("JobListing", backref="recommendations")
+
+    __table_args__ = (
+        Index("uq_user_job_day", "user_id", "job_id", "recommended_on", unique=True),
+    )

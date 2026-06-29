@@ -10,7 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError, ProgrammingError
 
 from app.config import CORS_ORIGINS, API_TITLE, API_VERSION, API_DESCRIPTION
 from app.database import Base, engine
-from app.routes import auth, cvs, cover_letters, job_applications, admin
+from app.routes import auth, cvs, cover_letters, job_applications, admin, settings, jobs
 
 #app.include_router(auth.router)
 
@@ -30,6 +30,25 @@ async def lifespan(app: FastAPI):
         logger.error(f"Startup migration failed: {e}")
         raise
     Base.metadata.create_all(bind=engine)
+    
+    # Seed default API keys
+    try:
+        from sqlalchemy.orm import Session
+        from app.models import AppSettings
+        with Session(engine) as db:
+            default_keys = [
+                ('ADZUNA_APP_ID', '', 'Adzuna API App ID — developer.adzuna.com', True),
+                ('ADZUNA_APP_KEY', '', 'Adzuna API Key — developer.adzuna.com', True),
+                ('JSEARCH_API_KEY', '', 'JSearch RapidAPI Key — rapidapi.com/jsearch', True),
+                ('ANTHROPIC_API_KEY', '', 'Anthropic API Key for AI scoring', True),
+            ]
+            for key_name, key_value, description, is_secret in default_keys:
+                if not db.query(AppSettings).filter_by(key_name=key_name).first():
+                    db.add(AppSettings(key_name=key_name, key_value=key_value, description=description, is_secret=is_secret))
+            db.commit()
+            logger.info("Default API keys seeded")
+    except Exception as e:
+        logger.error(f"Failed to seed API keys: {e}")
     os.makedirs("uploads", exist_ok=True)
     os.makedirs("uploads/photos", exist_ok=True)
     yield
@@ -87,6 +106,8 @@ app.include_router(cvs.router, prefix="/api")
 app.include_router(cover_letters.router, prefix="/api")
 app.include_router(job_applications.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(settings.router)
+app.include_router(jobs.router)
 
 @app.get("/")
 def read_root():

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { adminAPI } from '../services/api';
+import { adminAPI, settingsAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -628,6 +628,147 @@ const AuditLogsTab = ({ show }) => {
     );
 };
 
+const ApiKeysSection = ({ showToast }) => {
+    const [apiKeys, setApiKeys] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [editingKey, setEditingKey] = useState(null);
+    const [editValue, setEditValue] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [revealed, setRevealed] = useState({});
+
+    const fetchApiKeys = async () => {
+        try {
+            const res = await settingsAPI.getAll();
+            setApiKeys(res.data || []);
+        } catch (err) {
+            showToast('Failed to load API keys', 'error');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchApiKeys();
+    }, []);
+
+    const handleSave = async (key_name) => {
+        setSaving(true);
+        try {
+            await settingsAPI.update(key_name, editValue);
+            showToast('API key updated', 'success');
+            setEditingKey(null);
+            fetchApiKeys();
+        } catch (err) {
+            showToast('Failed to update API key', 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const toggleReveal = (key_name) => {
+        setRevealed(prev => ({ ...prev, [key_name]: !prev[key_name] }));
+    };
+
+    const displayKeys = [
+        { id: 'ADZUNA_APP_ID', label: 'Adzuna App ID', link: 'https://developer.adzuna.com' },
+        { id: 'ADZUNA_APP_KEY', label: 'Adzuna API Key', link: 'https://developer.adzuna.com' },
+        { id: 'JSEARCH_API_KEY', label: 'JSearch (RapidAPI) Key', link: 'https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch' },
+        { id: 'ANTHROPIC_API_KEY', label: 'Anthropic API Key', link: 'https://console.anthropic.com' },
+    ];
+
+    if (loading) return <div style={{ color: '#9ca3af', fontSize: 13, marginTop: 16 }}>Loading API Keys...</div>;
+
+    return (
+        <div style={{ background: '#1e1e46', borderRadius: 16, border: '1px solid rgba(255,255,255,0.1)', padding: 32, marginTop: 24 }}>
+            <div style={{ marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'white' }}>External API Keys</h2>
+                <p style={{ margin: '4px 0 0', fontSize: 13, color: '#9ca3af' }}>Manage keys for job recommendations and AI features</p>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                {displayKeys.map(k => {
+                    const dbKey = apiKeys.find(a => a.key_name === k.id) || {};
+                    const isSet = dbKey.is_set;
+                    const isEditing = editingKey === k.id;
+                    const isRevealed = revealed[k.id];
+
+                    return (
+                        <div key={k.id} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                    <label style={{ fontSize: 14, fontWeight: 600, color: '#e5e7eb' }}>{k.label}</label>
+                                    <span style={{ 
+                                        padding: '2px 8px', borderRadius: 12, fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+                                        background: isSet ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+                                        color: isSet ? '#34d399' : '#f87171',
+                                        border: `1px solid ${isSet ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`
+                                    }}>
+                                        {isSet ? 'Set' : 'Not Set'}
+                                    </span>
+                                </div>
+                                {!isEditing && (
+                                    <button 
+                                        onClick={() => { setEditingKey(k.id); setEditValue(''); }}
+                                        style={{ padding: '6px 14px', background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, transition: 'all 0.2s' }}
+                                    >
+                                        Edit
+                                    </button>
+                                )}
+                            </div>
+                            
+                            <p style={{ margin: 0, fontSize: 12, color: '#9ca3af' }}>
+                                {dbKey.description} <br/>
+                                <a href={k.link} target="_blank" rel="noreferrer" style={{ color: '#818cf8', textDecoration: 'none' }}>Get key →</a>
+                            </p>
+
+                            {isEditing ? (
+                                <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+                                    <input
+                                        type="text"
+                                        value={editValue}
+                                        onChange={(e) => setEditValue(e.target.value)}
+                                        placeholder="Paste new API key here..."
+                                        style={{ flex: 1, padding: '10px 14px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#d1d5db', fontFamily: 'monospace', fontSize: 13, outline: 'none' }}
+                                        autoFocus
+                                    />
+                                    <button 
+                                        onClick={() => handleSave(k.id)}
+                                        disabled={saving}
+                                        style={{ padding: '0 16px', background: '#6366f1', color: 'white', border: 'none', borderRadius: 8, cursor: saving ? 'not-allowed' : 'pointer', fontWeight: 600, opacity: saving ? 0.7 : 1 }}
+                                    >
+                                        Save
+                                    </button>
+                                    <button 
+                                        onClick={() => setEditingKey(null)}
+                                        style={{ padding: '0 16px', background: 'rgba(255,255,255,0.1)', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            ) : (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, background: 'rgba(0,0,0,0.15)', padding: '10px 14px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.05)' }}>
+                                    <span style={{ fontFamily: 'monospace', fontSize: 14, color: isSet ? '#d1d5db' : '#6b7280', letterSpacing: 2 }}>
+                                        {isSet ? (isRevealed ? dbKey.key_value : '••••••••') : 'Not Configured'}
+                                    </span>
+                                    {isSet && dbKey.is_secret && (
+                                        <button 
+                                            onClick={() => toggleReveal(k.id)}
+                                            style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', padding: 4, marginLeft: 'auto' }}
+                                            title={isRevealed ? "Hide" : "Reveal"}
+                                        >
+                                            {isRevealed ? '👁️‍🗨️' : '👁️'}
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
+
 // ── Main AdminPage ────────────────────────────────────────────────────────────
 
 const AdminPage = () => {
@@ -839,6 +980,8 @@ const AdminPage = () => {
                         </div>
                     </div>
                 )}
+                
+                {activeTab === 'settings' && <ApiKeysSection showToast={show} />}
             </div>
         </div>
     );

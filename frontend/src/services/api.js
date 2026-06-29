@@ -158,4 +158,16 @@ export const adminAPI = {
   getAuditLogs: (params) => apiClient.get('/admin/audit-logs', { params }),
 };
 
+// ── Settings ──────────────────────────────────────────────────────────────────
+export const settingsAPI = {
+  getAll: () => apiClient.get('/settings/'),
+  update: (key_name, value) => apiClient.patch(`/settings/${key_name}`, { value }),
+};
+
+// ── Jobs Recommendation ───────────────────────────────────────────────────────
+export const jobsAPI = {
+  getRecommendations: () => apiClient.get('/jobs/recommendations'),
+  action: (rec_id, action) => apiClient.patch(`/jobs/recommendations/${rec_id}/action`, { action }),
+};
+
 export default apiClient;

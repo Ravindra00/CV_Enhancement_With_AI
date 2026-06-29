@@ -19,6 +19,7 @@ const Navbar = ({ isDark, onToggleDark }) => {
     { to: '/dashboard', label: t('My Resumes') || 'My CVs', icon: '📄' },
     { to: '/cover-letters', label: t('Cover Letters'), icon: '✉️' },
     { to: '/jobs', label: t('Job Tracker'), icon: '🎯' },
+    { to: '/recommended-jobs', label: t('Recommended Jobs'), icon: '💼' },
     ...(user?.is_superuser ? [{ to: '/admin', label: 'Admin', icon: '⚙️' }] : []),
   ];
 

@@ -34,6 +34,7 @@ class UserResponse(UserBase):
     failed_login_attempts: int = 0
     locked_until: Optional[datetime] = None
     created_at: datetime
+    job_preferences: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True
@@ -89,6 +90,7 @@ class ChangePasswordRequest(BaseModel):
 
 class UserProfileUpdateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
+    job_preferences: Optional[Dict[str, Any]] = None
 
 
 class SignupResponse(BaseModel):
